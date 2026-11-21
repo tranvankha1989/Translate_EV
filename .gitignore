@@ -5,6 +5,7 @@ __pycache__/
 # Build output (bản exe phát hành qua GitHub Releases, không đưa vào repo)
 build/
 dist/
+release/
 *.spec
 icon.ico
 

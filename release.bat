@@ -28,17 +28,19 @@ git push || (echo Khong day duoc code len GitHub. & pause & exit /b 1)
 py -3.11 -m pip install -r requirements.txt pyinstaller || (echo Khong cai duoc thu vien. & pause & exit /b 1)
 py -3.11 -m unittest test_features test_translator test_app_log test_updater || (echo Test that bai. & pause & exit /b 1)
 py -3.11 icons.py icon.ico || (echo Khong tao duoc icon. & pause & exit /b 1)
-py -3.11 -m PyInstaller --noconfirm --clean --onefile --windowed --name TranslateVietnam --icon icon.ico app.py || (
+rem Build vao thu muc rieng "release" de khong dung cham file exe dang chay trong dist.
+py -3.11 -m PyInstaller --noconfirm --clean --onefile --windowed --name TranslateVietnam --icon icon.ico --distpath release app.py || (
     echo Build that bai. & pause & exit /b 1
 )
-py -3.11 -c "import hashlib; d=open(r'dist\TranslateVietnam.exe','rb').read(); open(r'dist\TranslateVietnam.exe.sha256','w').write(hashlib.sha256(d).hexdigest()+'  TranslateVietnam.exe\n')"
+py -3.11 -c "import hashlib; d=open(r'release\TranslateVietnam.exe','rb').read(); open(r'release\TranslateVietnam.exe.sha256','w').write(hashlib.sha256(d).hexdigest()+'  TranslateVietnam.exe\n')"
 
 set "NOTES=--generate-notes"
 if exist release_notes.md set "NOTES=--notes-file release_notes.md"
-gh release create v%VERSION% dist\TranslateVietnam.exe dist\TranslateVietnam.exe.sha256 -R %REPO% --title "Translate Vietnam %VERSION%" %NOTES% || (
+gh release create v%VERSION% release\TranslateVietnam.exe release\TranslateVietnam.exe.sha256 -R %REPO% --title "Translate Vietnam %VERSION%" %NOTES% || (
     echo Tao ban phat hanh that bai. & pause & exit /b 1
 )
 
 echo.
 echo Da phat hanh v%VERSION%. App cua nguoi dung se tu bao co ban moi trong vong 1 ngay.
+if exist release_notes.md echo Nho sua hoac xoa release_notes.md truoc lan phat hanh sau.
 pause
