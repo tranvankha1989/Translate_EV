@@ -26,7 +26,7 @@ git diff --quiet && git diff --cached --quiet || (
 git push || (echo Khong day duoc code len GitHub. & pause & exit /b 1)
 
 py -3.11 -m pip install -r requirements.txt pyinstaller || (echo Khong cai duoc thu vien. & pause & exit /b 1)
-py -3.11 -m unittest test_features test_translator test_app_log test_updater || (echo Test that bai. & pause & exit /b 1)
+py -3.11 -m unittest test_features test_translator test_app_log test_updater test_installer || (echo Test that bai. & pause & exit /b 1)
 py -3.11 icons.py icon.ico || (echo Khong tao duoc icon. & pause & exit /b 1)
 rem Build vao thu muc rieng "release" de khong dung cham file exe dang chay trong dist.
 py -3.11 -m PyInstaller --noconfirm --clean --onefile --windowed --name TranslateVietnam --icon icon.ico --distpath release app.py || (

@@ -152,6 +152,119 @@ def update_path(exe_path):
     return os.path.splitext(exe_path)[0] + ".update.exe"
 
 
+def update_cache_dir():
+    """Nơi tải bản cập nhật khi thư mục cài đặt cần quyền quản trị (ví dụ Program Files)."""
+    folder = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "TranslateVietnam", "updates")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def download_path(exe_path):
+    folder = os.path.dirname(exe_path)
+    if folder_writable(folder):
+        return update_path(exe_path)
+    return os.path.join(update_cache_dir(), os.path.basename(update_path(exe_path)))
+
+
+def folder_writable(folder):
+    """Thư mục (hoặc thư mục cha gần nhất đang có) ghi được mà không cần quyền quản trị."""
+    probe = os.path.abspath(folder)
+    while not os.path.isdir(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            return False
+        probe = parent
+    # Không dùng tempfile.mkstemp: trên Windows nó thử lại hàng trăm nghìn lần khi bị cấm ghi
+    # (ví dụ Program Files) và làm treo app. Chỉ thử tạo một file một lần.
+    path = os.path.join(probe, f".tv-write-test-{os.getpid()}-{os.urandom(4).hex()}")
+    try:
+        handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError:
+        return False
+    os.close(handle)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return True
+
+
+def copy_with_retry(source, target, timeout=30.0):
+    """Chép file, thử lại trong lúc file đích còn bị khóa (tiến trình cũ đang thoát)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            shutil.copyfile(source, target)
+            return
+        except PermissionError:
+            if not folder_writable(os.path.dirname(target)) or time.monotonic() >= deadline:
+                raise
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+        time.sleep(0.5)
+
+
+def copy_self_to(target):
+    """Chạy trong tiến trình có quyền quản trị (--copy-to): chỉ chép chính file exe này tới đích."""
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        copy_with_retry(sys.executable, target)
+        return True
+    except OSError:
+        return False
+
+
+class _ShellExecuteInfo(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong), ("hwnd", wintypes.HWND),
+        ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+        ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE),
+        ("lpIDList", ctypes.c_void_p), ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+        ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE),
+    ]
+
+
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(_ShellExecuteInfo)]
+shell32.ShellExecuteExW.restype = wintypes.BOOL
+kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+ERROR_CANCELLED = 1223
+
+
+def shell_execute(file, params="", verb=None, wait=False, show=0):
+    """Chạy chương trình qua ShellExecuteEx. verb="runas" để Windows hỏi quyền quản trị.
+
+    Trả về mã thoát (wait=True) hoặc 0; None nếu người dùng bấm "No" ở hộp hỏi quyền.
+    """
+    info = _ShellExecuteInfo()
+    info.cbSize = ctypes.sizeof(info)
+    info.fMask = 0x00000040 | 0x00000400  # SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI
+    info.lpVerb, info.lpFile, info.lpParameters, info.nShow = verb, file, params, show
+    if not shell32.ShellExecuteExW(ctypes.byref(info)):
+        error = ctypes.get_last_error()
+        if error == ERROR_CANCELLED:
+            return None
+        raise ctypes.WinError(error)
+    if not info.hProcess:
+        return 0
+    try:
+        if not wait:
+            return 0
+        kernel32.WaitForSingleObject(info.hProcess, 0xFFFFFFFF)
+        code = wintypes.DWORD()
+        kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(code))
+        return code.value
+    finally:
+        kernel32.CloseHandle(info.hProcess)
+
+
+def elevated_copy(source_exe, target):
+    """Cho file exe `source_exe` tự chép tới `target` với quyền quản trị. None nếu bị từ chối."""
+    return shell_execute(source_exe, subprocess.list2cmdline(["--copy-to", target]), verb="runas", wait=True)
+
+
 def download(release, dest, on_progress=None, session=None):
     """Tải và kiểm tra file exe mới. Lỗi ở bất kỳ bước nào thì xóa file dở dang."""
     session = session or requests.Session()
@@ -196,7 +309,7 @@ def _clean_env():
     return env
 
 
-def _launch(args):
+def launch(args):
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(args, close_fds=True, creationflags=flags, env=_clean_env(),
                      cwd=os.path.dirname(args[0]))
@@ -207,7 +320,7 @@ def start_install(new_exe, exe_path):
     pids = [os.getpid()]
     if getattr(sys, "frozen", False):
         pids.append(os.getppid())  # bản exe 1 file: tiến trình cha cũng giữ file exe
-    _launch([new_exe, "--install-update", exe_path, "--wait-pid", ",".join(map(str, pids))])
+    launch([new_exe, "--install-update", exe_path, "--wait-pid", ",".join(map(str, pids))])
 
 
 def wait_for_pids(pids, timeout=30.0):
@@ -224,19 +337,27 @@ def wait_for_pids(pids, timeout=30.0):
 
 
 def install_update(target, wait_pids, version=APP_VERSION, timeout=30.0):
-    """Chạy trong file *.update.exe: chép chính nó đè lên exe cũ rồi mở lại exe đó."""
+    """Chạy trong file *.update.exe: chép chính nó đè lên exe cũ rồi mở lại exe đó.
+
+    Thư mục cài đặt cần quyền quản trị (Program Files) thì chỉ bước chép chạy với quyền đó.
+    Nếu chép không được (bị từ chối quyền...) thì mở lại bản cũ để người dùng không mất app.
+    Trả về True nếu đã cập nhật.
+    """
     wait_for_pids(wait_pids, timeout)
     source = sys.executable
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            shutil.copyfile(source, target)
-            break
-        except OSError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.5)
-    _launch([target, "--updated", version, "--cleanup", source])
+    try:
+        if folder_writable(os.path.dirname(target)):
+            copy_with_retry(source, target, timeout)
+            ok = True
+        else:
+            ok = elevated_copy(source, target) == 0
+    except OSError:
+        ok = False
+    if ok:
+        launch([target, "--updated", version, "--cleanup", source])
+    else:
+        launch([target, "--cleanup", source])
+    return ok
 
 
 def cleanup(path, timeout=20.0):
@@ -254,16 +375,22 @@ def cleanup(path, timeout=20.0):
             time.sleep(0.5)
 
 
+VALUE_ARGS = ("--install-update", "--wait-pid", "--updated", "--cleanup", "--copy-to", "--install-to")
+FLAG_ARGS = ("--installed", "--uninstall", "--quiet", "--portable", "--no-desktop")
+
+
 def parse_args(argv):
-    """Đọc các tham số --install-update, --wait-pid, --updated, --cleanup."""
+    """Đọc tham số dòng lệnh của quy trình cập nhật / cài đặt / gỡ cài đặt."""
     result = {}
     i = 0
     while i < len(argv):
         name = argv[i]
-        if name in ("--install-update", "--wait-pid", "--updated", "--cleanup") and i + 1 < len(argv):
+        if name in VALUE_ARGS and i + 1 < len(argv):
             result[name.lstrip("-")] = argv[i + 1]
             i += 2
         else:
+            if name in FLAG_ARGS:
+                result[name.lstrip("-")] = True
             i += 1
     if "wait-pid" in result:
         result["wait-pid"] = [int(p) for p in result["wait-pid"].split(",") if p.strip().isdigit()]

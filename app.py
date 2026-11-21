@@ -23,9 +23,10 @@ import requests
 import filters
 import hotkeys
 import icons
+import installer
 import translator
 import updater
-from config import APP_NAME, Settings, model_label
+from config import APP_NAME, APP_VERSION, Settings, config_dir, model_label
 from translator import TranslationCancelled, is_vietnamese, translate
 
 OFF, AUTO, TO_VI, TO_EN = "off", "auto", "vi", "en"
@@ -40,6 +41,7 @@ DOUBLE_COPY_MIN, DOUBLE_COPY_MAX = 0.06, 0.6
 DEBOUNCE_SECONDS = 0.35  # "Mỗi lần copy": copy liên tiếp nhanh thì chỉ dịch lần cuối
 WM_CLIPBOARDUPDATE = 0x031D
 WM_SHOW_PANEL = 0x8002  # WM_APP + 2: bản chạy sau nhờ bản đang chạy mở Bảng điều khiển
+WM_QUIT_APP = 0x8003  # WM_APP + 3: trình gỡ cài đặt nhờ bản đang chạy thoát
 HWND_MESSAGE = ctypes.c_void_p(-3)
 LISTENER_CLASS = "TranslateVietnamMessageWindow"
 MUTEX_NAME = "Local\\TranslateVietnam.SingleInstance"
@@ -450,6 +452,9 @@ def message_listener():
         if message == WM_SHOW_PANEL:
             ui_call(show_panel)
             return 0
+        if message == WM_QUIT_APP:
+            request_quit()
+            return 0
         return user32.DefWindowProcW(hwnd, message, wparam, lparam)
 
     class WindowClass(ctypes.Structure):
@@ -732,6 +737,17 @@ class Controller:
     def quit(self):
         request_quit()
 
+    # ----- cài vào Windows -----
+    def can_install(self):
+        return getattr(sys, "frozen", False) and not installer.is_installed_copy()
+
+    def install_location(self):
+        exe = installer.installed_exe()
+        return os.path.dirname(exe) if exe and installer.is_installed_copy() else None
+
+    def restart_to_install(self):
+        restart_to_install()
+
     # ----- cập nhật qua GitHub -----
     can_self_update = staticmethod(updater.can_self_update)
     releases_page = updater.RELEASES_PAGE
@@ -748,7 +764,7 @@ class Controller:
     def install_update(self, release, on_progress=None):
         """Chạy trong luồng phụ: tải, kiểm tra rồi giao cho bản mới tự cài; app này thoát."""
         exe_path = sys.executable
-        target = updater.update_path(exe_path)
+        target = updater.download_path(exe_path)  # Program Files: tải vào thư mục tạm của người dùng
         try:
             updater.download(release, target, on_progress)
         except (requests.RequestException, OSError) as e:
@@ -793,16 +809,161 @@ def update_checker():
 
 
 def handle_update_args(args):
-    """Xử lý tham số của quy trình cập nhật. Trả về True nếu tiến trình này chỉ để cài đặt."""
+    """Xử lý tham số của quy trình cập nhật. Trả về True nếu tiến trình này chỉ để cài bản cập nhật."""
     if "install-update" in args:
         try:
-            updater.install_update(args["install-update"], args.get("wait-pid", []))
+            if not updater.install_update(args["install-update"], args.get("wait-pid", [])):
+                log("Chưa cài được bản cập nhật (có thể chưa cấp quyền quản trị), đã mở lại bản cũ")
         except Exception as e:
             log(f"Cài bản cập nhật thất bại: {e!r}")
         return True
-    if "cleanup" in args:
-        threading.Thread(target=updater.cleanup, args=(args["cleanup"],), daemon=True).start()
     return False
+
+
+# ---------------------------------------------------------------- cài vào Windows / gỡ cài đặt
+
+def show_message(text, error=False):
+    import tkinter as tk
+    from tkinter import messagebox
+
+    root = tk.Tk()
+    root.withdraw()
+    (messagebox.showerror if error else messagebox.showinfo)(APP_NAME, text, parent=root)
+    root.destroy()
+
+
+def ask_install():
+    from PIL import ImageTk
+
+    from panel import ask_install_options
+
+    return ask_install_options(
+        installer.default_install_dir(), installer.normalize_install_dir, installer.needs_admin,
+        window_icon=lambda root: ImageTk.PhotoImage(icons.app_icon(64), master=root))
+
+
+def own_pids():
+    pids = [os.getpid()]
+    if getattr(sys, "frozen", False):
+        pids.append(os.getppid())  # bản exe 1 file: tiến trình cha cũng giữ file exe
+    return ",".join(map(str, pids))
+
+
+def launch_installed(target, args):
+    """Mở bản đã cài (chờ tiến trình này thoát để nhường quyền "chỉ chạy một bản")."""
+    extra = ["--installed"]
+    if args.get("updated"):
+        extra += ["--updated", args["updated"]]
+    if args.get("cleanup"):
+        extra += ["--cleanup", args["cleanup"]]
+    updater.launch([target, *extra, "--wait-pid", own_pids()])
+
+
+def maybe_install(args):
+    """Bản exe chưa cài: cài vào Windows rồi chuyển sang bản đã cài. True = tiến trình này thoát."""
+    if not getattr(sys, "frozen", False) or args.get("portable") or installer.is_installed_copy():
+        return False
+    existing = installer.installed_exe()
+    try:
+        if existing and os.path.exists(existing):
+            # Đã cài rồi: bản này mới hơn thì nâng cấp bản đã cài, sau đó mở bản đã cài.
+            if installer.version_tuple(APP_VERSION) > installer.version_tuple(installer.installed_version()):
+                target = installer.install_to(os.path.dirname(existing), desktop=False)
+            else:
+                target = existing
+        elif "install-to" in args:  # cài không hỏi, dùng cho dòng lệnh / quản trị viên
+            target = installer.install_to(installer.normalize_install_dir(args["install-to"]),
+                                          desktop=not args.get("no-desktop"))
+        else:
+            if settings["run_without_install"]:
+                return False
+            choice = ask_install()
+            if choice is None:
+                return True  # Hủy: thoát
+            if choice[0] == "portable":
+                settings.update(run_without_install=True)
+                return False
+            _, folder, desktop = choice
+            target = installer.install_to(folder, desktop=desktop)
+    except installer.InstallCancelled:
+        show_message("Chưa cài được vì chưa cấp quyền quản trị.\n"
+                     "App sẽ chạy tạm không cài đặt; chạy lại file để cài, hoặc chọn thư mục khác.")
+        return False
+    except OSError as e:
+        log(f"Cài đặt thất bại: {e!r}")
+        show_message(f"Cài đặt thất bại: {e}\nApp sẽ chạy tạm không cài đặt.", error=True)
+        return False
+    launch_installed(target, args)
+    return True
+
+
+def stop_running_instance(timeout=10.0):
+    hwnd = user32.FindWindowExW(HWND_MESSAGE, None, LISTENER_CLASS, None)
+    if not hwnd:
+        return
+    user32.PostMessageW(hwnd, WM_QUIT_APP, 0, 0)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and user32.FindWindowExW(HWND_MESSAGE, None, LISTENER_CLASS, None):
+        time.sleep(0.2)
+    time.sleep(1.0)  # chờ tiến trình cha của exe 1 file thoát hẳn
+
+
+def remove_autostart_for(folder):
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                            winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as key:
+            paths = re.findall(r'"([^"]+)"', winreg.QueryValueEx(key, RUN_VALUE)[0])
+            if paths and os.path.normcase(os.path.dirname(os.path.abspath(paths[0]))) == os.path.normcase(
+                    os.path.abspath(folder)):
+                winreg.DeleteValue(key, RUN_VALUE)
+    except OSError:
+        pass
+
+
+def uninstall_app(quiet=False):
+    """Gỡ cài đặt (Settings → Apps gọi exe với --uninstall)."""
+    import shutil
+
+    exe = installer.installed_exe() or sys.executable
+    folder = os.path.dirname(exe)
+    root = messagebox = None
+    if not quiet:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        if not messagebox.askyesno(f"Gỡ {APP_NAME}", f"Gỡ {APP_NAME} khỏi máy?", parent=root):
+            root.destroy()
+            return
+    stop_running_instance()
+    installer.remove_shortcuts(exe)
+    installer.unregister()
+    remove_autostart_for(folder)
+    if root is not None and messagebox.askyesno(
+            APP_NAME, "Xóa luôn cài đặt của bạn (chế độ, lĩnh vực, phím tắt, API key…)?\n"
+                      "Chọn No để giữ lại, lần sau cài lại sẽ dùng tiếp.", parent=root):
+        shutil.rmtree(config_dir(), ignore_errors=True)
+        shutil.rmtree(os.path.join(os.environ.get("LOCALAPPDATA") or "", "TranslateVietnam"), ignore_errors=True)
+    try:
+        scheduled = installer.remove_files_later(folder) is not None
+    except OSError:
+        scheduled = False
+    if root is not None:
+        if not scheduled:
+            messagebox.showinfo(APP_NAME, f"Đã gỡ {APP_NAME}. Còn file trong thư mục\n{folder}\n"
+                                          "chưa xóa được (chưa cấp quyền quản trị), bạn có thể tự xóa.",
+                                parent=root)
+        root.destroy()
+
+
+def restart_to_install():
+    """Nút "Cài vào máy…": bật lại câu hỏi cài đặt rồi khởi động lại app."""
+    settings.update(run_without_install=False)
+    updater.launch([sys.executable, "--wait-pid", own_pids()])
+    request_quit()
 
 
 def build_menu():
@@ -828,13 +989,15 @@ def build_menu():
     )
 
 
-def on_ready(icon_, hotkey_errors, updated_to=None):
+def on_ready(icon_, hotkey_errors, updated_to=None, installed=False):
     icon_.visible = True
     threading.Thread(target=message_listener, daemon=True).start()
     threading.Thread(target=watcher, daemon=True).start()
     threading.Thread(target=update_checker, daemon=True).start()
     if updated_to:
         notify(f"Đã cập nhật {APP_NAME} lên phiên bản {updated_to}.")
+    elif installed:
+        notify(f"Đã cài {APP_NAME} vào máy.\nLần sau mở từ Start Menu (gõ \"Translate\") hoặc lối tắt ngoài Desktop.")
     if hotkey_errors:
         notify("Phím tắt không dùng được: " + "; ".join(
             f"{hotkeys.display(settings[key])} {why}" for key, why in hotkey_errors.items())
@@ -858,8 +1021,16 @@ def pump_ui():
 def main():
     global settings, mode, seen_sequence, hotkey_manager, icon, panel, tk_root
     args = updater.parse_args(sys.argv[1:])
+    if "copy-to" in args:  # tiến trình phụ có quyền quản trị: chỉ chép file exe rồi thoát
+        sys.exit(0 if updater.copy_self_to(args["copy-to"]) else 1)
     if handle_update_args(args):
         return  # tiến trình cài bản cập nhật: chép file xong là thoát
+    if args.get("uninstall"):
+        set_dpi_awareness()
+        uninstall_app(quiet=bool(args.get("quiet")))
+        return
+    if args.get("wait-pid"):
+        updater.wait_for_pids(args["wait-pid"])  # chờ bản trước nhường chỗ (sau khi cài / cập nhật)
     if not acquire_single_instance():
         return  # đã có bản đang chạy: bản đó sẽ mở Bảng điều khiển
     set_dpi_awareness()
@@ -867,10 +1038,20 @@ def main():
     first_run = settings.first_run
     if first_run and not settings.save():
         log("Không lưu được cài đặt lần đầu")
+    if maybe_install(args):
+        return  # đã chuyển sang bản cài trong Windows (hoặc người dùng bấm Hủy)
+    if "cleanup" in args:
+        threading.Thread(target=updater.cleanup, args=(args["cleanup"],), daemon=True).start()
+    installed_copy = installer.is_installed_copy()
+    if installed_copy:
+        try:
+            installer.repair()
+        except OSError as e:
+            log(f"Không cập nhật được mục cài đặt: {e!r}")
     mode = settings["mode"]
     translator.load_gemini_usage(settings["gemini_usage_day"], settings["gemini_usage_count"])
     apply_translator_settings()
-    apply_autostart(settings["autostart"])
+    apply_autostart(settings["autostart"], force=installed_copy)  # bản đã cài luôn là bản tự khởi động
     seen_sequence = clipboard_sequence()
     for target in icons.MODE_COLOR:
         icons.tray_icon(target, 0)
@@ -888,8 +1069,9 @@ def main():
     panel = ControlPanel(tk_root, Controller(), window_icon)
     icon = pystray.Icon("translate-vn", icons.tray_icon(mode, 0),
                         f"{APP_NAME}: {MODE_LABEL[mode]}", build_menu())
-    icon.run_detached(setup=lambda icon_: on_ready(icon_, hotkey_errors, args.get("updated")))
-    if first_run or settings["show_panel_on_start"]:
+    icon.run_detached(setup=lambda icon_: on_ready(icon_, hotkey_errors, args.get("updated"),
+                                                   bool(args.get("installed"))))
+    if first_run or settings["show_panel_on_start"] or (args.get("installed") and not args.get("updated")):
         tk_root.after(300, show_panel)
     tk_root.after(100, pump_ui)
     try:

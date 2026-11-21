@@ -17,12 +17,19 @@
 
 ## Cách dùng bản EXE
 
-1. Tải `TranslateVietnam.exe` trong phần Releases.
-2. Đặt file vào một thư mục cố định, ví dụ `C:\Apps\TranslateVietnam`.
-3. Chạy `TranslateVietnam.exe`. Lần đầu, Bảng điều khiển sẽ mở ra và chế độ Tự động đã bật sẵn.
+1. Tải `TranslateVietnam.exe` trong phần [Releases](https://github.com/tranvankha1989/Translate_EV/releases/latest).
+2. Chạy file. Cửa sổ **Cài đặt** hiện ra:
+   - Chọn ổ đĩa / thư mục cài đặt (mặc định `C:\Program Files\Translate Vietnam`). Cài vào Program Files thì Windows sẽ hỏi quyền quản trị khi cài và mỗi lần cập nhật; chọn thư mục khác (ví dụ `D:\Apps`) thì không hỏi.
+   - Tích / bỏ tích *Tạo lối tắt ngoài Desktop*, rồi bấm **Cài đặt**.
+   - Hoặc **Chạy không cài đặt** để dùng file exe trực tiếp (không hỏi lại; muốn cài sau thì vào Mở rộng → Khác → *Cài vào máy…*).
+3. Ứng dụng mở ra từ thư mục đã cài, Bảng điều khiển hiện lên và chế độ Tự động đã bật sẵn. File vừa tải về có thể xóa.
 4. Bôi đen văn bản, nhấn nhanh `Ctrl+C` hai lần, chờ icon ở khay hệ thống (cạnh đồng hồ) tô xanh đủ 100%, rồi `Ctrl+V`.
 
-Muốn mở lại Bảng điều khiển: chuột phải vào icon → **Bảng điều khiển…**, hoặc chạy lại `TranslateVietnam.exe`.
+**Mở lại sau khi thoát:** bấm phím Windows, gõ *Translate* (lối tắt trong Start Menu), hoặc bấm lối tắt **Translate Vietnam** ngoài Desktop. Khi ứng dụng đang chạy, mở lại nó sẽ hiện Bảng điều khiển.
+
+**Gỡ cài đặt:** Cài đặt Windows → Ứng dụng → *Translate Vietnam* → Gỡ cài đặt. Ứng dụng hỏi có xóa luôn cài đặt (API key…) hay giữ lại cho lần cài sau.
+
+Cài không hỏi (cho quản trị viên): `TranslateVietnam.exe --install-to "D:\Apps" --no-desktop`.
 
 ## Điều khiển
 
@@ -59,7 +66,7 @@ Khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ d
 
 Phiên bản đang dùng hiện ở dòng trên cùng của Bảng điều khiển. Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, dòng đó **nhấp nháy đỏ "↑ Cập nhật lên x.y.z"**. Bấm vào sẽ mở cửa sổ **Có bản mới** liệt kê các tính năng mới; bấm **Cập nhật ngay** là ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại, tiến độ hiện ngay tại dòng phiên bản (hoặc **Để sau**). Không cần cài git hay công cụ nào khác.
 
-**Không cần gỡ cài đặt, cài đặt không bị mất.** Ứng dụng là một file exe chạy trực tiếp (không có trình cài đặt). Toàn bộ cài đặt — chế độ, lĩnh vực, phím tắt, API key, danh sách loại trừ — được lưu riêng trong `%APPDATA%\TranslateVietnam\config.json`, nên thay file exe (tự động hay thủ công) vẫn giữ nguyên mọi thứ.
+**Không cần gỡ cài đặt, cài đặt không bị mất.** Toàn bộ cài đặt — chế độ, lĩnh vực, phím tắt, API key, danh sách loại trừ — được lưu riêng trong `%APPDATA%\TranslateVietnam\config.json`, không nằm trong file exe, nên cập nhật (tự động hay thủ công) vẫn giữ nguyên mọi thứ. Chạy một file exe mới hơn bản đã cài cũng tự nâng cấp bản đã cài, không hỏi lại thư mục.
 
 ### Đang dùng bản cũ chưa có tính năng tự cập nhật
 
@@ -67,7 +74,7 @@ Bản cũ không tự biết có bản mới, nên cần thay file **một lần
 
 1. Chuột phải vào icon ở khay hệ thống → **Thoát**.
 2. Tải `TranslateVietnam.exe` mới trong [Releases](https://github.com/tranvankha1989/Translate_EV/releases/latest).
-3. Chép đè lên file cũ (cùng thư mục, cùng tên) để chế độ chạy cùng Windows vẫn trỏ đúng file. Nếu muốn đặt ở thư mục khác, hãy xóa file cũ đi.
+3. Chạy file mới và cài như hướng dẫn ở trên (bản cài sẽ tự nhận chế độ chạy cùng Windows). Sau đó có thể xóa file exe cũ.
 4. Chạy `TranslateVietnam.exe`. Từ đây trở đi ứng dụng tự cập nhật.
 
 Lưu ý từ bản 1.0.0: mặc định cần **nhấn nhanh `Ctrl+C` hai lần** mới dịch. Muốn dịch mỗi lần copy như bản cũ, chọn *Dịch khi: Mỗi lần copy* trong Bảng điều khiển.
@@ -91,7 +98,7 @@ run.bat
 Chạy test:
 
 ```bat
-py -3.11 -m unittest test_features test_translator test_app_log test_updater
+py -3.11 -m unittest test_features test_translator test_app_log test_updater test_installer
 ```
 
 ## Tự build EXE

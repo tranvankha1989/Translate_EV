@@ -1,5 +1,6 @@
 """Bảng điều khiển: cửa sổ gọn, có nút "Mở rộng" để hiện thêm tùy chọn."""
 import ctypes
+import os
 import re
 import threading
 import tkinter as tk
@@ -300,6 +301,19 @@ class ControlPanel:
             row=7, column=0, sticky="w")
         self.check_update_button = ttk.Button(other, text="Kiểm tra cập nhật", command=self.check_updates_now)
         self.check_update_button.grid(row=8, column=0, sticky="w", pady=(4, 0))
+        location = self.c.install_location()
+        if location:
+            ttk.Label(other, style="Hint.TLabel", wraplength=320,
+                      text=f"Đã cài tại: {location}\nGỡ cài đặt trong Cài đặt Windows → Ứng dụng.").grid(
+                row=9, column=0, sticky="w", pady=(6, 0))
+        elif self.c.can_install():
+            ttk.Button(other, text="Cài vào máy…", command=self._install_now).grid(
+                row=9, column=0, sticky="w", pady=(6, 0))
+
+    def _install_now(self):
+        if messagebox.askyesno(f"Cài đặt – {APP_NAME}",
+                               "App sẽ khởi động lại và hỏi thư mục cài đặt. Tiếp tục?", parent=self.root):
+            self.c.restart_to_install()
 
     def _check(self, parent, key, text):
         var = tk.BooleanVar()
@@ -646,3 +660,85 @@ class ControlPanel:
             "mật khẩu được bỏ qua theo cài đặt Bảo vệ dữ liệu.\n\n"
             f"Cài đặt: {self.c.config_path}\n"
             f"Nhật ký lỗi: {self.c.log_path()}"), parent=self.root)
+
+
+def ask_install_options(default_folder, normalize, needs_admin, window_icon=None):
+    """Cửa sổ cài đặt lần đầu. Trả về ("install", thư mục, tạo_desktop), ("portable",) hoặc None (hủy)."""
+    root = tk.Tk()
+    root.title(f"Cài đặt {APP_NAME}")
+    root.resizable(False, False)
+    if window_icon is not None:
+        icon = window_icon(root)
+        root.iconphoto(True, icon)
+    style = ttk.Style(root)
+    if "vista" in style.theme_names():
+        style.theme_use("vista")
+    style.configure("Hint.TLabel", foreground="#666666")
+    style.configure("Warn.TLabel", foreground="#9a6700")
+    result = {"value": None}
+
+    frame = ttk.Frame(root, padding=16)
+    frame.grid(sticky="nsew")
+    frame.columnconfigure(0, weight=1)
+    ttk.Label(frame, text=f"Cài đặt {APP_NAME} {APP_VERSION}", font=("Segoe UI", 12, "bold")).grid(
+        row=0, column=0, columnspan=2, sticky="w")
+    ttk.Label(frame, style="Hint.TLabel", wraplength=440, text=(
+        "Ứng dụng sẽ được cài vào máy, có lối tắt trong Start Menu và gỡ được trong "
+        "Cài đặt Windows → Ứng dụng.")).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 12))
+    ttk.Label(frame, text="Thư mục cài đặt:").grid(row=2, column=0, columnspan=2, sticky="w")
+    folder_var = tk.StringVar(value=default_folder)
+    ttk.Entry(frame, textvariable=folder_var, width=52).grid(row=3, column=0, sticky="ew", pady=(2, 0))
+
+    def browse():
+        from tkinter import filedialog
+        current = folder_var.get()
+        start = current if os.path.isdir(current) else os.path.dirname(current)
+        chosen = filedialog.askdirectory(parent=root, initialdir=start, title="Chọn ổ đĩa / thư mục cài đặt")
+        if chosen:
+            folder_var.set(normalize(chosen))
+
+    ttk.Button(frame, text="Thay đổi…", command=browse).grid(row=3, column=1, padx=(6, 0), pady=(2, 0))
+    admin_hint = ttk.Label(frame, style="Warn.TLabel", wraplength=440)
+    admin_hint.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+    def update_hint(*_):
+        folder = folder_var.get().strip()
+        admin_hint.configure(text=(
+            "Thư mục này cần quyền quản trị: Windows sẽ hỏi xác nhận khi cài đặt và mỗi lần cập nhật."
+            if folder and needs_admin(folder) else ""))
+
+    folder_var.trace_add("write", update_hint)
+    update_hint()
+    desktop_var = tk.BooleanVar(value=True)
+    ttk.Checkbutton(frame, text="Tạo lối tắt ngoài Desktop", variable=desktop_var).grid(
+        row=5, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
+    def finish(value):
+        result["value"] = value
+        root.destroy()
+
+    def install():
+        folder = folder_var.get().strip()
+        if not folder:
+            return
+        finish(("install", normalize(folder), desktop_var.get()))
+
+    buttons = ttk.Frame(frame)
+    buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(16, 0))
+    ok = ttk.Button(buttons, text="Cài đặt", command=install)
+    ok.grid(row=0, column=0)
+    ttk.Button(buttons, text="Chạy không cài đặt", command=lambda: finish(("portable",))).grid(
+        row=0, column=1, padx=(6, 0))
+    ttk.Button(buttons, text="Hủy", command=lambda: finish(None)).grid(row=0, column=2, padx=(6, 0))
+    root.bind("<Return>", lambda e: install())
+    root.bind("<Escape>", lambda e: finish(None))
+    root.protocol("WM_DELETE_WINDOW", lambda: finish(None))
+    root.update_idletasks()
+    x = (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2
+    y = (root.winfo_screenheight() - root.winfo_reqheight()) // 3
+    root.geometry(f"+{max(0, x)}+{max(0, y)}")
+    root.attributes("-topmost", True)
+    root.after(300, lambda: root.attributes("-topmost", False))
+    ok.focus_set()
+    root.mainloop()
+    return result["value"]
