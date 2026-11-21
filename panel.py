@@ -127,8 +127,11 @@ class ControlPanel:
         self.version_badge = tk.Label(header, font=("Segoe UI", 9), bd=0, padx=8, pady=2)
         self.version_badge.grid(row=0, column=1, sticky="e")
         self.version_badge.bind("<Button-1>", lambda e: self._badge_clicked())
+        self.version_badge.bind("<Enter>", lambda e: self._badge_hover(True))
+        self.version_badge.bind("<Leave>", lambda e: self._badge_hover(False))
         self.update_release = None
         self.updating = False
+        self.checking = False
         self._update_dialog = None
         self._blink_job = None
         self._blink_on = False
@@ -295,12 +298,7 @@ class ControlPanel:
         self._check(other, "notify_errors", "Thông báo khi không dịch được").grid(row=3, column=0, sticky="w")
         ttk.Button(other, text="Mở thư mục log", command=self.c.open_log_folder).grid(
             row=4, column=0, sticky="w", pady=(4, 0))
-        ttk.Separator(other).grid(row=5, column=0, sticky="ew", pady=8)
-        ttk.Label(other, text=f"Phiên bản hiện tại: {APP_VERSION}").grid(row=6, column=0, sticky="w")
-        self._check(other, "auto_update", "Tự động kiểm tra bản cập nhật (mỗi ngày)").grid(
-            row=7, column=0, sticky="w")
-        self.check_update_button = ttk.Button(other, text="Kiểm tra cập nhật", command=self.check_updates_now)
-        self.check_update_button.grid(row=8, column=0, sticky="w", pady=(4, 0))
+        # Kiểm tra cập nhật: bấm vào dòng phiên bản trên cùng (app vẫn tự kiểm tra mỗi ngày).
         location = self.c.install_location()
         if location:
             ttk.Label(other, style="Hint.TLabel", wraplength=320,
@@ -466,7 +464,12 @@ class ControlPanel:
         self.version_badge.configure(text=text, bg=bg, fg=fg, cursor=cursor)
 
     def _badge_normal(self):
-        self._set_badge(f"Phiên bản {APP_VERSION}", self._header_bg, "#666666")
+        """Bình thường: "Phiên bản x.y.z", bấm vào để kiểm tra bản mới."""
+        self._set_badge(f"Phiên bản {APP_VERSION}", self._header_bg, "#666666", "hand2")
+
+    def _badge_hover(self, inside):
+        if not self.update_release and not self.updating and not self.checking:
+            self.version_badge.configure(fg="#0b57d0" if inside else "#666666")
 
     def _stop_blink(self):
         if self._blink_job:
@@ -495,8 +498,13 @@ class ControlPanel:
         self._blink()
 
     def _badge_clicked(self):
-        if self.update_release and not self.updating:
+        """Có bản mới: hỏi nâng cấp. Chưa có: kiểm tra trên GitHub."""
+        if self.updating or self.checking:
+            return
+        if self.update_release:
             self.confirm_update(self.update_release)
+        else:
+            self.check_updates_now()
 
     def confirm_update(self, release):
         """Cửa sổ "Có bản mới": hiện tính năng mới, người dùng bấm "Cập nhật ngay" để cập nhật."""
@@ -516,8 +524,8 @@ class ControlPanel:
         frame.grid(sticky="nsew")
         ttk.Label(frame, text=f"Có bản mới {release.version}", font=("Segoe UI", 11, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(frame, text=f"Bạn đang dùng bản {APP_VERSION}.", style="Hint.TLabel").grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(frame, text=f"Bạn đang dùng bản {APP_VERSION}. Bạn có muốn nâng cấp không?",
+                  style="Hint.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Label(frame, text="Có gì mới:").grid(row=2, column=0, columnspan=2, sticky="w")
         notes = tk.Text(frame, width=54, height=9, wrap="word", font="TkDefaultFont", relief="flat",
                         padx=8, pady=6, highlightthickness=1, highlightbackground="#c0c0c0")
@@ -544,7 +552,7 @@ class ControlPanel:
 
         buttons = ttk.Frame(frame)
         buttons.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
-        ok = ttk.Button(buttons, text="Cập nhật ngay" if self_update else "Mở trang tải", command=update_now)
+        ok = ttk.Button(buttons, text="Đồng ý" if self_update else "Mở trang tải", command=update_now)
         ok.grid(row=0, column=0)
         ttk.Button(buttons, text="Để sau", command=close).grid(row=0, column=1, padx=(6, 0))
         win.bind("<Return>", lambda e: update_now())
@@ -558,8 +566,9 @@ class ControlPanel:
         ok.focus_set()
 
     def check_updates_now(self):
-        self.check_update_button.configure(state="disabled")
-        self.set_status("Đang kiểm tra bản cập nhật trên GitHub…")
+        """Bấm "Phiên bản x.y.z": kiểm tra GitHub. Mới nhất thì báo; có bản mới thì nhấp nháy chờ nâng cấp."""
+        self.checking = True
+        self._set_badge("Đang kiểm tra…", "#e8f0fe", "#0b57d0", "watch")
 
         def work():
             try:
@@ -568,14 +577,18 @@ class ControlPanel:
                 release, error = None, str(e)
 
             def done():
-                self.check_update_button.configure(state="normal")
+                self.checking = False
+                title = f"Kiểm tra cập nhật – {APP_NAME}"
                 if error:
-                    self.set_status(error, error=True)
+                    self._badge_normal()
+                    messagebox.showwarning(title, f"Không kiểm tra được bản cập nhật.\n{error}", parent=self.root)
                 elif release:
-                    self.set_status(f"Có bản mới {release.version}.")
-                    self.confirm_update(release)
+                    # show_update_available đã được gọi (qua check_update): dòng phiên bản đang nhấp nháy.
+                    self.show_update_available(release)
+                    self.set_status(f"Có bản mới {release.version}: bấm vào dòng phiên bản nhấp nháy để nâng cấp.")
                 else:
-                    self.set_status(f"Bạn đang dùng bản mới nhất ({APP_VERSION}).")
+                    self._badge_normal()
+                    messagebox.showinfo(title, f"Bạn đang dùng bản mới nhất ({APP_VERSION}).", parent=self.root)
 
             self.c.ui_call(done)
 
@@ -593,7 +606,6 @@ class ControlPanel:
         self._stop_blink()
         busy = ("#e8f0fe", "#0b57d0", "watch")
         self._set_badge("Đang tải… 0%", *busy)
-        self.check_update_button.configure(state="disabled")
         self.set_status(f"Đang tải bản {release.version} từ GitHub…")
 
         def progress(fraction):
@@ -612,7 +624,6 @@ class ControlPanel:
 
                 def failed():
                     self.updating = False
-                    self.check_update_button.configure(state="normal")
                     self.set_status(message, error=True)
                     self.show_update_available(release)  # nhấp nháy lại để thử lần nữa
                     if messagebox.askyesno(f"Cập nhật – {APP_NAME}",

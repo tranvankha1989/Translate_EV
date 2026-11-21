@@ -64,7 +64,12 @@ Khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ d
 
 ## Cập nhật
 
-Phiên bản đang dùng hiện ở dòng trên cùng của Bảng điều khiển. Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, dòng đó **nhấp nháy đỏ "↑ Cập nhật lên x.y.z"**. Bấm vào sẽ mở cửa sổ **Có bản mới** liệt kê các tính năng mới; bấm **Cập nhật ngay** là ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại, tiến độ hiện ngay tại dòng phiên bản (hoặc **Để sau**). Không cần cài git hay công cụ nào khác.
+Phiên bản đang dùng hiện ở dòng trên cùng của Bảng điều khiển (**Phiên bản x.y.z**). Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày; muốn kiểm tra ngay thì **bấm vào dòng phiên bản**:
+
+- Đang là bản mới nhất: hiện thông báo *Bạn đang dùng bản mới nhất*.
+- Có bản mới: dòng đó **nhấp nháy đỏ "↑ Cập nhật lên x.y.z"**. Bấm vào sẽ hiện các tính năng mới và hỏi có muốn nâng cấp không; bấm **Đồng ý** là ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại, tiến độ hiện ngay tại dòng phiên bản (hoặc **Để sau**).
+
+Không cần cài git hay công cụ nào khác.
 
 **Không cần gỡ cài đặt, cài đặt không bị mất.** Toàn bộ cài đặt — chế độ, lĩnh vực, phím tắt, API key, danh sách loại trừ — được lưu riêng trong `%APPDATA%\TranslateVietnam\config.json`, không nằm trong file exe, nên cập nhật (tự động hay thủ công) vẫn giữ nguyên mọi thứ. Chạy một file exe mới hơn bản đã cài cũng tự nâng cấp bản đã cài, không hỏi lại thư mục.
 
