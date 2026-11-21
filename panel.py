@@ -104,17 +104,36 @@ class ControlPanel:
 
         outer = ttk.Frame(root, padding=10)
         outer.grid(sticky="nsew")
+        outer.columnconfigure(0, weight=1)
+        self._build_header(outer)
         self._build_basic(outer)
         self.ext = ttk.Frame(outer)
-        self.ext.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        self.ext.grid(row=5, column=0, sticky="ew", pady=(8, 0))
         self._build_extended(self.ext)
         self.ext.grid_remove()
         self.refresh_all()
 
     # ---------- dựng giao diện ----------
+    def _build_header(self, outer):
+        """Dòng trên cùng: tên app và phiên bản. Có bản mới thì nhấp nháy, bấm vào là cập nhật."""
+        bg = ttk.Style(self.root).lookup("TFrame", "background") or "SystemButtonFace"
+        self._header_bg = bg
+        header = tk.Frame(outer, bg=bg)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        header.columnconfigure(0, weight=1)
+        tk.Label(header, text=APP_NAME, font=("Segoe UI", 10, "bold"), bg=bg).grid(row=0, column=0, sticky="w")
+        self.version_badge = tk.Label(header, font=("Segoe UI", 9), bd=0, padx=8, pady=2)
+        self.version_badge.grid(row=0, column=1, sticky="e")
+        self.version_badge.bind("<Button-1>", lambda e: self._badge_clicked())
+        self.update_release = None
+        self.updating = False
+        self._blink_job = None
+        self._blink_on = False
+        self._badge_normal()
+
     def _build_basic(self, outer):
         basic = ttk.LabelFrame(outer, text="Điều khiển", padding=(10, 6))
-        basic.grid(row=0, column=0, sticky="ew")
+        basic.grid(row=1, column=0, sticky="ew")
         basic.columnconfigure(1, weight=1)
 
         ttk.Label(basic, text="Chế độ dịch:").grid(row=0, column=0, sticky="w", pady=3)
@@ -147,25 +166,15 @@ class ControlPanel:
         self.engine_label = ttk.Label(basic, style="Hint.TLabel", wraplength=300)
         self.engine_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
-        # Dòng báo có bản cập nhật (ẩn cho tới khi tìm thấy bản mới trên GitHub).
-        self.update_frame = ttk.Frame(basic)
-        self.update_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.update_frame.columnconfigure(0, weight=1)
-        self.update_label = ttk.Label(self.update_frame, style="Link.TLabel")
-        self.update_label.grid(row=0, column=0, sticky="w")
-        self.update_button = ttk.Button(self.update_frame, text="Cập nhật")
-        self.update_button.grid(row=0, column=1, sticky="e")
-        self.update_frame.grid_remove()
-        self.update_release = None
 
         system = ttk.Frame(outer)
-        system.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        system.grid(row=2, column=0, sticky="w", pady=(6, 0))
         self._check(system, "autostart", "Khởi động cùng Windows").grid(row=0, column=0, sticky="w")
         self._check(system, "show_panel_on_start", "Hiện bảng điều khiển khi khởi động").grid(
             row=1, column=0, sticky="w")
 
         buttons = ttk.Frame(outer)
-        buttons.grid(row=2, column=0, pady=(8, 0))
+        buttons.grid(row=3, column=0, pady=(8, 0))
         ttk.Button(buttons, text="Đóng", width=13, command=self.hide).grid(row=0, column=0)
         ttk.Button(buttons, text="Thoát app", width=13, command=self.c.quit).grid(row=0, column=1, padx=6)
         self.expand_button = ttk.Button(buttons, text="Mở rộng >>", width=13, command=self.toggle_expanded)
@@ -176,7 +185,7 @@ class ControlPanel:
         ttk.Button(buttons, text="Mặc định", width=13, command=self.reset).grid(row=1, column=2, pady=(6, 0))
 
         self.status = ttk.Label(outer, style="Hint.TLabel", wraplength=330)
-        self.status.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.status.grid(row=4, column=0, sticky="w", pady=(6, 0))
 
     def _build_extended(self, ext):
         ext.columnconfigure(0, weight=1)
@@ -436,16 +445,42 @@ class ControlPanel:
         self.set_status("Đã khôi phục cài đặt mặc định.")
         self.show_hotkey_errors(errors)
 
-    # ---------- hướng dẫn / thông tin ----------
-    # ---------- cập nhật qua GitHub ----------
+    # ---------- cập nhật qua GitHub (dòng phiên bản trên cùng) ----------
+    def _set_badge(self, text, bg, fg, cursor=""):
+        self.version_badge.configure(text=text, bg=bg, fg=fg, cursor=cursor)
+
+    def _badge_normal(self):
+        self._set_badge(f"Phiên bản {APP_VERSION}", self._header_bg, "#666666")
+
+    def _stop_blink(self):
+        if self._blink_job:
+            self.root.after_cancel(self._blink_job)
+            self._blink_job = None
+
+    def _blink(self):
+        """Nhấp nháy đỏ để người dùng chú ý có bản mới."""
+        release = self.update_release
+        if not release or self.updating:
+            self._blink_job = None
+            return
+        self._blink_on = not self._blink_on
+        bg, fg = ("#d93025", "white") if self._blink_on else ("#fce8e6", "#b3261e")
+        self._set_badge(f"↑ Cập nhật lên {release.version}", bg, fg, "hand2")
+        self._blink_job = self.root.after(550, self._blink)
+
     def show_update_available(self, release):
         self.update_release = release
-        if not release:
-            self.update_frame.grid_remove()
+        self._stop_blink()
+        if self.updating:
             return
-        self.update_label.configure(text=f"Có bản mới {release.version}")
-        self.update_button.configure(command=lambda: self.prompt_update(release))
-        self.update_frame.grid()
+        if not release:
+            self._badge_normal()
+            return
+        self._blink()
+
+    def _badge_clicked(self):
+        if self.update_release and not self.updating:
+            self.start_update(self.update_release)
 
     def check_updates_now(self):
         self.check_update_button.configure(state="disabled")
@@ -462,8 +497,7 @@ class ControlPanel:
                 if error:
                     self.set_status(error, error=True)
                 elif release:
-                    self.set_status(f"Có bản mới {release.version}.")
-                    self.prompt_update(release)
+                    self.set_status(f"Có bản mới {release.version}. Bấm dòng phiên bản ở trên cùng để cập nhật.")
                 else:
                     self.set_status(f"Bạn đang dùng bản mới nhất ({APP_VERSION}).")
 
@@ -471,41 +505,40 @@ class ControlPanel:
 
         threading.Thread(target=work, daemon=True).start()
 
-    def prompt_update(self, release):
-        self.show()
-        notes = release.notes[:900] + ("…" if len(release.notes) > 900 else "")
+    def start_update(self, release):
+        """Bấm một lần là cập nhật: tải, kiểm tra, cài rồi tự khởi động lại (tiến độ hiện ngay tại dòng phiên bản)."""
+        if self.updating:
+            return
         if not self.c.can_self_update():
-            if messagebox.askyesno(
-                    f"Cập nhật – {APP_NAME}",
-                    f"Có bản mới {release.version} (bạn đang dùng {APP_VERSION}).\n\n{notes}\n\n"
-                    "Bạn đang chạy từ mã nguồn nên app không tự cập nhật được. Mở trang tải về?",
-                    parent=self.root):
-                webbrowser.open(release.page_url)
+            webbrowser.open(release.page_url)
+            self.set_status("Bạn đang chạy từ mã nguồn nên app không tự cập nhật được: đã mở trang tải bản mới.")
             return
-        if not messagebox.askyesno(
-                f"Cập nhật – {APP_NAME}",
-                f"Có bản mới {release.version} (bạn đang dùng {APP_VERSION}).\n\n{notes}\n\n"
-                "Cập nhật ngay? App sẽ tải bản mới từ GitHub, kiểm tra rồi tự khởi động lại.",
-                parent=self.root):
-            return
-        self.update_button.configure(state="disabled")
+        self.updating = True
+        self._stop_blink()
+        busy = ("#e8f0fe", "#0b57d0", "watch")
+        self._set_badge("Đang tải… 0%", *busy)
         self.check_update_button.configure(state="disabled")
-        self.set_status("Đang tải bản cập nhật… 0%")
+        self.set_status(f"Đang tải bản {release.version} từ GitHub…")
 
         def progress(fraction):
-            self.c.ui_call(lambda: self.set_status(f"Đang tải bản cập nhật… {int(fraction * 100)}%"))
+            self.c.ui_call(lambda: self._set_badge(f"Đang tải… {int(fraction * 100)}%", *busy))
+
+        def installing():
+            self._set_badge("Đang cài đặt…", *busy)
+            self.set_status("Đang cài bản cập nhật, app sẽ tự khởi động lại…")
 
         def work():
             try:
                 self.c.install_update(release, progress)
-                self.c.ui_call(lambda: self.set_status("Đang cài bản cập nhật, app sẽ khởi động lại…"))
+                self.c.ui_call(installing)
             except Exception as e:
                 message = str(e)
 
                 def failed():
-                    self.update_button.configure(state="normal")
+                    self.updating = False
                     self.check_update_button.configure(state="normal")
                     self.set_status(message, error=True)
+                    self.show_update_available(release)  # nhấp nháy lại để thử lần nữa
                     if messagebox.askyesno(f"Cập nhật – {APP_NAME}",
                                            f"{message}\n\nMở trang GitHub để tải bản mới thủ công?",
                                            parent=self.root):
@@ -515,6 +548,7 @@ class ControlPanel:
 
         threading.Thread(target=work, daemon=True).start()
 
+    # ---------- hướng dẫn / thông tin ----------
     def show_help(self):
         vi, en, toggle = (hotkeys.display(self.c.get(k)) for k in ("hotkey_vi", "hotkey_en", "hotkey_toggle"))
         messagebox.showinfo(f"Hướng dẫn – {APP_NAME}", (

@@ -772,7 +772,7 @@ def set_available_release(release):
     if release and release.version != _notified_version:
         _notified_version = release.version
         notify(f"Có bản cập nhật {APP_NAME} {release.version}.\n"
-               "Chuột phải vào icon → Cập nhật, hoặc mở Bảng điều khiển.")
+               "Mở Bảng điều khiển và bấm dòng phiên bản trên cùng để cập nhật.")
 
 
 def update_checker():
@@ -820,7 +820,8 @@ def build_menu():
         pystray.MenuItem("Hướng dẫn", lambda: ui_call(lambda: panel and panel.show_help())),
         pystray.MenuItem(
             lambda item: f"Cập nhật lên bản {available_release.version}…" if available_release else "Cập nhật",
-            lambda: ui_call(lambda: panel and available_release and panel.prompt_update(available_release)),
+            lambda: ui_call(lambda: panel and available_release and (
+                panel.show(), panel.start_update(available_release))),
             visible=lambda item: available_release is not None,
         ),
         pystray.Menu.SEPARATOR,

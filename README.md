@@ -57,7 +57,7 @@ Khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ d
 
 ## Cập nhật
 
-Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, ứng dụng hiện thông báo; bấm **Cập nhật** để ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại. Không cần cài git hay công cụ nào khác.
+Phiên bản đang dùng hiện ở dòng trên cùng của Bảng điều khiển. Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, dòng đó **nhấp nháy đỏ "↑ Cập nhật lên x.y.z"** — bấm vào là ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại, tiến độ hiện ngay tại chỗ. Không cần cài git hay công cụ nào khác.
 
 **Không cần gỡ cài đặt, cài đặt không bị mất.** Ứng dụng là một file exe chạy trực tiếp (không có trình cài đặt). Toàn bộ cài đặt — chế độ, lĩnh vực, phím tắt, API key, danh sách loại trừ — được lưu riêng trong `%APPDATA%\TranslateVietnam\config.json`, nên thay file exe (tự động hay thủ công) vẫn giữ nguyên mọi thứ.
 
