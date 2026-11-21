@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Build output (bản exe phát hành qua GitHub Releases, không đưa vào repo)
+build/
+dist/
+*.spec
+icon.ico
+
+# Nhật ký lỗi và file tạm của app
+app.log
+*.tmp
+
+# Shortcut cá nhân
+*.lnk

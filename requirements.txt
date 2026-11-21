@@ -1,0 +1,5 @@
+pyperclip
+pystray
+Pillow
+requests
+langdetect==1.0.9

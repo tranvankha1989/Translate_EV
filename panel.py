@@ -1,0 +1,457 @@
+"""Bảng điều khiển: cửa sổ gọn, có nút "Mở rộng" để hiện thêm tùy chọn."""
+import ctypes
+import re
+import threading
+import tkinter as tk
+import webbrowser
+from tkinter import messagebox, ttk
+
+import hotkeys
+from config import APP_NAME, APP_VERSION, DOMAINS, GEMINI_MODELS, MAX_BACKUP_KEYS, model_from_label, model_label
+
+MODE_CHOICES = [("auto", "Tự động hai chiều"), ("vi", "Sang tiếng Việt"), ("en", "Sang tiếng Anh"), ("off", "Tắt")]
+MODE_BY_LABEL = {label: mode for mode, label in MODE_CHOICES}
+TRIGGER_CHOICES = [("double", "Nhấn Ctrl+C hai lần"), ("single", "Mỗi lần copy")]
+TRIGGER_BY_LABEL = {label: trigger for trigger, label in TRIGGER_CHOICES}
+LABEL_BY_TRIGGER = dict(TRIGGER_CHOICES)
+LABEL_BY_MODE = dict(MODE_CHOICES)
+HOTKEY_NAMES = {"hotkey_toggle": "Bật/tắt dịch", "hotkey_vi": "Sang tiếng Việt", "hotkey_en": "Sang tiếng Anh"}
+GEMINI_KEY_URL = "https://aistudio.google.com/apikey"
+_MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+_user32 = ctypes.WinDLL("user32")
+_user32.GetKeyState.argtypes = [ctypes.c_int]
+_user32.GetKeyState.restype = ctypes.c_short
+
+
+def _down(vk):
+    return bool(_user32.GetKeyState(vk) & 0x8000)
+
+
+class HotkeyEntry(ttk.Entry):
+    """Ô nhập phím tắt: bấm vào ô rồi nhấn tổ hợp phím mới."""
+
+    def __init__(self, master, panel, key):
+        self.var = tk.StringVar()
+        super().__init__(master, textvariable=self.var, width=24, justify="center")
+        self.panel, self.key = panel, key
+        self.bind("<FocusIn>", self._focus_in)
+        self.bind("<FocusOut>", self._focus_out)
+        self.bind("<KeyPress>", self._key)
+        for sequence in ("<<Paste>>", "<<Cut>>", "<Button-2>"):
+            self.bind(sequence, lambda e: "break")
+        self.refresh()
+
+    def refresh(self):
+        self.var.set(hotkeys.display(self.panel.c.get(self.key)))
+
+    def _focus_in(self, _event):
+        # Tạm nhả phím toàn cục, nếu không Windows sẽ "nuốt" phím trước khi ô này nhận được.
+        self.panel.c.suspend_hotkeys()
+        self.var.set("Nhấn phím mới…")
+
+    def _focus_out(self, _event):
+        self.refresh()
+        self.panel.show_hotkey_errors(self.panel.c.resume_hotkeys())
+
+    def _key(self, event):
+        vk = event.keycode  # trên Windows, Tk trả về virtual-key code
+        ctrl, alt, shift = _down(0x11), _down(0x12), _down(0x10)
+        win = _down(0x5B) or _down(0x5C)
+        if vk in _MODIFIER_VKS:
+            return "break"
+        if vk == 0x09 and not (ctrl or alt or win):
+            return None  # Tab: chuyển sang ô khác
+        if vk == 0x1B:  # Esc: giữ phím cũ
+            self.panel.root.focus_set()
+            return "break"
+        if vk in (0x08, 0x2E):  # Backspace / Delete: bỏ phím
+            spec = ""
+        else:
+            try:
+                spec = hotkeys.spec_from_vk(vk, ctrl=ctrl, alt=alt, shift=shift, win=win)
+            except ValueError as e:
+                self.panel.set_status(str(e), error=True)
+                return "break"
+        error = self.panel.c.set_hotkey(self.key, spec)
+        if error:
+            self.panel.set_status(error, error=True)
+        else:
+            self.panel.set_status(f"{HOTKEY_NAMES[self.key]}: {hotkeys.display(spec)}")
+        self.panel.root.focus_set()  # rời ô -> đăng ký lại phím
+        return "break"
+
+
+class ControlPanel:
+    def __init__(self, root, controller, window_icon=None):
+        self.root, self.c = root, controller
+        self.expanded = False
+        self.positioned = False
+        self.bool_vars = {}
+        self.hotkey_entries = []
+        root.title(f"{APP_NAME} {APP_VERSION}")
+        root.resizable(False, False)
+        root.protocol("WM_DELETE_WINDOW", self.hide)
+        if window_icon is not None:
+            root.iconphoto(True, window_icon)
+        style = ttk.Style(root)
+        if "vista" in style.theme_names():
+            style.theme_use("vista")
+        style.configure("Hint.TLabel", foreground="#666666")
+        style.configure("Link.TLabel", foreground="#0b57d0")
+        style.configure("Error.TLabel", foreground="#b3261e")
+
+        outer = ttk.Frame(root, padding=10)
+        outer.grid(sticky="nsew")
+        self._build_basic(outer)
+        self.ext = ttk.Frame(outer)
+        self.ext.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        self._build_extended(self.ext)
+        self.ext.grid_remove()
+        self.refresh_all()
+
+    # ---------- dựng giao diện ----------
+    def _build_basic(self, outer):
+        basic = ttk.LabelFrame(outer, text="Điều khiển", padding=(10, 6))
+        basic.grid(row=0, column=0, sticky="ew")
+        basic.columnconfigure(1, weight=1)
+
+        ttk.Label(basic, text="Chế độ dịch:").grid(row=0, column=0, sticky="w", pady=3)
+        self.mode_var = tk.StringVar()
+        mode_box = ttk.Combobox(basic, textvariable=self.mode_var, state="readonly", width=26,
+                                values=[label for _, label in MODE_CHOICES])
+        mode_box.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
+        mode_box.bind("<<ComboboxSelected>>", lambda e: self.c.set_mode(MODE_BY_LABEL[self.mode_var.get()]))
+
+        ttk.Label(basic, text="Dịch khi:").grid(row=1, column=0, sticky="w", pady=3)
+        self.trigger_var = tk.StringVar()
+        trigger_box = ttk.Combobox(basic, textvariable=self.trigger_var, state="readonly", width=26,
+                                   values=[label for _, label in TRIGGER_CHOICES])
+        trigger_box.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
+        trigger_box.bind("<<ComboboxSelected>>",
+                         lambda e: self.c.set_option("trigger", TRIGGER_BY_LABEL[self.trigger_var.get()]))
+
+        ttk.Label(basic, text="Lĩnh vực:").grid(row=2, column=0, sticky="w", pady=3)
+        self.domain_var = tk.StringVar()
+        domain_box = ttk.Combobox(basic, textvariable=self.domain_var, values=DOMAINS, width=26)
+        domain_box.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=3)
+        for sequence in ("<<ComboboxSelected>>", "<FocusOut>", "<Return>"):
+            domain_box.bind(sequence, lambda e: self._save_gemini())
+
+        ttk.Label(basic, text="Phím bật/tắt:").grid(row=3, column=0, sticky="w", pady=3)
+        entry = HotkeyEntry(basic, self, "hotkey_toggle")
+        entry.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=3)
+        self.hotkey_entries.append(entry)
+
+        self.engine_label = ttk.Label(basic, style="Hint.TLabel", wraplength=300)
+        self.engine_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+        system = ttk.Frame(outer)
+        system.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self._check(system, "autostart", "Khởi động cùng Windows").grid(row=0, column=0, sticky="w")
+        self._check(system, "show_panel_on_start", "Hiện bảng điều khiển khi khởi động").grid(
+            row=1, column=0, sticky="w")
+
+        buttons = ttk.Frame(outer)
+        buttons.grid(row=2, column=0, pady=(8, 0))
+        ttk.Button(buttons, text="Đóng", width=13, command=self.hide).grid(row=0, column=0)
+        ttk.Button(buttons, text="Thoát app", width=13, command=self.c.quit).grid(row=0, column=1, padx=6)
+        self.expand_button = ttk.Button(buttons, text="Mở rộng >>", width=13, command=self.toggle_expanded)
+        self.expand_button.grid(row=0, column=2)
+        ttk.Button(buttons, text="Hướng dẫn", width=13, command=self.show_help).grid(row=1, column=0, pady=(6, 0))
+        ttk.Button(buttons, text="Thông tin", width=13, command=self.show_about).grid(
+            row=1, column=1, padx=6, pady=(6, 0))
+        ttk.Button(buttons, text="Mặc định", width=13, command=self.reset).grid(row=1, column=2, pady=(6, 0))
+
+        self.status = ttk.Label(outer, style="Hint.TLabel", wraplength=330)
+        self.status.grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+    def _build_extended(self, ext):
+        ext.columnconfigure(0, weight=1)
+        tabs = ttk.Notebook(ext)
+        tabs.grid(row=0, column=0, sticky="ew")
+
+        gemini = ttk.Frame(tabs, padding=10)
+        tabs.add(gemini, text="AI Gemini")
+        gemini.columnconfigure(1, weight=1)
+        ttk.Label(gemini, text="Dịch theo lĩnh vực bằng AI Gemini (tùy chọn).").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        ttk.Label(gemini, text="API key:").grid(row=1, column=0, sticky="w", pady=3)
+        self.key_var = tk.StringVar()
+        self.key_entry = ttk.Entry(gemini, textvariable=self.key_var, show="•", width=30)
+        self.key_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
+        for sequence in ("<FocusOut>", "<Return>"):
+            self.key_entry.bind(sequence, lambda e: self._save_gemini())
+        self.show_key = tk.BooleanVar(value=False)
+        ttk.Checkbutton(gemini, text="Hiện", variable=self.show_key,
+                        command=lambda: self.key_entry.configure(show="" if self.show_key.get() else "•")).grid(
+            row=1, column=2, padx=(6, 0))
+        ttk.Label(gemini, text="Model:").grid(row=2, column=0, sticky="w", pady=3)
+        self.model_var = tk.StringVar()
+        model_box = ttk.Combobox(gemini, textvariable=self.model_var, width=28,
+                                 values=[model_label(m) for m in GEMINI_MODELS])
+        model_box.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=3)
+        for sequence in ("<<ComboboxSelected>>", "<FocusOut>", "<Return>"):
+            model_box.bind(sequence, lambda e: self._save_gemini())
+        actions = ttk.Frame(gemini)
+        actions.grid(row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.check_button = ttk.Button(actions, text="Kiểm tra key", command=self.check_key)
+        self.check_button.grid(row=0, column=0)
+        link = ttk.Label(actions, text="Lấy API key miễn phí", style="Link.TLabel", cursor="hand2")
+        link.grid(row=0, column=1, padx=(10, 0))
+        link.bind("<Button-1>", lambda e: webbrowser.open(GEMINI_KEY_URL))
+        ttk.Label(gemini, style="Hint.TLabel", wraplength=320, text=(
+            "Để trống API key: dùng Google Dịch. Gemini hết lượt miễn phí hoặc lỗi thì app tự "
+            "chuyển sang Google Dịch. Lưu ý: ở gói miễn phí, Google có thể dùng nội dung gửi lên "
+            "để cải thiện sản phẩm.")).grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        backup = ttk.Frame(tabs, padding=10)
+        tabs.add(backup, text="Key dự phòng")
+        backup.columnconfigure(1, weight=1)
+        ttk.Label(backup, style="Hint.TLabel", wraplength=320, text=(
+            "Khi key chính hết lượt hoặc lỗi, app lần lượt dùng các key dự phòng, hết cả mới "
+            "chuyển sang Google Dịch.")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        self.backup_vars, self.backup_entries = [], []
+        for i in range(MAX_BACKUP_KEYS):
+            ttk.Label(backup, text=f"Key dự phòng {i + 1}:").grid(row=i + 1, column=0, sticky="w", pady=3)
+            var = tk.StringVar()
+            entry = ttk.Entry(backup, textvariable=var, show="•", width=28)
+            entry.grid(row=i + 1, column=1, sticky="ew", padx=(8, 0), pady=3)
+            for sequence in ("<FocusOut>", "<Return>"):
+                entry.bind(sequence, lambda e: self._save_gemini())
+            self.backup_vars.append(var)
+            self.backup_entries.append(entry)
+        self.show_backup = tk.BooleanVar(value=False)
+        ttk.Checkbutton(backup, text="Hiện", variable=self.show_backup, command=self._toggle_backup_visibility).grid(
+            row=1, column=2, padx=(6, 0))
+        ttk.Label(backup, style="Hint.TLabel", wraplength=320, text=(
+            "Lưu ý: lượt miễn phí tính theo project, nên các key trong cùng một project dùng chung "
+            "lượt. Nên dùng key của project có bật thanh toán làm dự phòng. Dùng nhiều project/tài "
+            "khoản miễn phí để vượt giới hạn là trái điều khoản của Google và có thể bị khóa key.")).grid(
+            row=MAX_BACKUP_KEYS + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        keys = ttk.Frame(tabs, padding=10)
+        tabs.add(keys, text="Phím tắt")
+        keys.columnconfigure(1, weight=1)
+        for row, key in enumerate(("hotkey_vi", "hotkey_en")):
+            ttk.Label(keys, text=HOTKEY_NAMES[key] + ":").grid(row=row, column=0, sticky="w", pady=3)
+            entry = HotkeyEntry(keys, self, key)
+            entry.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
+            self.hotkey_entries.append(entry)
+        ttk.Label(keys, style="Hint.TLabel", wraplength=320,
+                  text="Bấm vào ô rồi nhấn phím mới. Esc: giữ phím cũ, Backspace: bỏ phím.").grid(
+            row=2, column=0, columnspan=2, sticky="w")
+
+        privacy = ttk.Frame(tabs, padding=10)
+        tabs.add(privacy, text="Bảo vệ dữ liệu")
+        self._check(privacy, "skip_password_managers", "Bỏ qua nội dung từ trình quản lý mật khẩu").grid(
+            row=0, column=0, sticky="w")
+        self._check(privacy, "skip_sensitive_text", "Bỏ qua mật khẩu, mã token, URL, đường dẫn, email").grid(
+            row=1, column=0, sticky="w")
+        ttk.Label(privacy, text="Không tự dịch khi copy từ các app (mỗi dòng một tên):").grid(
+            row=2, column=0, sticky="w", pady=(4, 2))
+        self.apps_text = tk.Text(privacy, height=3, width=40, font="TkDefaultFont", relief="flat",
+                                 highlightthickness=1, highlightbackground="#a0a0a0", highlightcolor="#0b57d0")
+        self.apps_text.grid(row=3, column=0, sticky="ew")
+        self.apps_text.bind("<FocusOut>", lambda e: self._save_apps())
+
+        other = ttk.Frame(tabs, padding=10)
+        tabs.add(other, text="Khác")
+        other.columnconfigure(0, weight=1)
+        ttk.Label(other, style="Hint.TLabel", wraplength=320, text=(
+            "Khi Google Dịch bận, app dùng MyMemory. Nhập email để tăng hạn mức miễn phí "
+            "của MyMemory (email được gửi kèm yêu cầu dịch tới MyMemory).")).grid(
+            row=0, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(other, text="Email cho MyMemory (tùy chọn):").grid(row=1, column=0, sticky="w")
+        self.email_var = tk.StringVar()
+        email = ttk.Entry(other, textvariable=self.email_var, width=40)
+        email.grid(row=2, column=0, sticky="ew", pady=(2, 4))
+        for sequence in ("<FocusOut>", "<Return>"):
+            email.bind(sequence, lambda e: self._save_email())
+        self._check(other, "notify_errors", "Thông báo khi không dịch được").grid(row=3, column=0, sticky="w")
+        ttk.Button(other, text="Mở thư mục log", command=self.c.open_log_folder).grid(
+            row=4, column=0, sticky="w", pady=(4, 0))
+
+    def _check(self, parent, key, text):
+        var = tk.BooleanVar()
+        self.bool_vars[key] = var
+        return ttk.Checkbutton(parent, text=text, variable=var,
+                               command=lambda: self.c.set_option(key, var.get()))
+
+    # ---------- hiển thị ----------
+    def show(self):
+        self.refresh_all()
+        self.root.deiconify()
+        if not self.positioned:
+            self.root.update_idletasks()
+            x = (self.root.winfo_screenwidth() - self.root.winfo_reqwidth()) // 2
+            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) // 3
+            self.root.geometry(f"+{max(0, x)}+{max(0, y)}")
+            self.positioned = True
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
+
+    def hide(self):
+        self._save_apps()
+        self._save_email()
+        self._save_gemini()
+        self.root.withdraw()
+
+    def toggle_expanded(self):
+        self.expanded = not self.expanded
+        if self.expanded:
+            self.ext.grid()
+            self.expand_button.configure(text="Thu gọn <<")
+        else:
+            self.ext.grid_remove()
+            self.expand_button.configure(text="Mở rộng >>")
+
+    def set_status(self, text, error=False):
+        self.status.configure(text=text, style="Error.TLabel" if error else "Hint.TLabel")
+
+    def show_hotkey_errors(self, errors):
+        if errors:
+            self.set_status("Không dùng được phím: " + "; ".join(
+                f"{HOTKEY_NAMES.get(key, key)} ({hotkeys.display(self.c.get(key))}) {why}"
+                for key, why in errors.items()), error=True)
+
+    def refresh_mode(self):
+        self.mode_var.set(LABEL_BY_MODE[self.c.current_mode()])
+        self.refresh_engine()
+
+    def refresh_engine(self):
+        self.engine_label.configure(text=self.c.engine_summary())
+
+    def refresh_all(self):
+        self.refresh_mode()
+        self.trigger_var.set(LABEL_BY_TRIGGER[self.c.get("trigger")])
+        self.domain_var.set(self.c.get("domain"))
+        self.key_var.set(self.c.get("gemini_api_key"))
+        backups = self.c.get("gemini_backup_keys")
+        for i, var in enumerate(self.backup_vars):
+            var.set(backups[i] if i < len(backups) else "")
+        self.model_var.set(model_label(self.c.get("gemini_model")))
+        self.email_var.set(self.c.get("mymemory_email"))
+        for key, var in self.bool_vars.items():
+            var.set(self.c.get(key))
+        for entry in self.hotkey_entries:
+            if self.root.focus_get() is not entry:
+                entry.refresh()
+        self.apps_text.delete("1.0", "end")
+        self.apps_text.insert("1.0", "\n".join(self.c.get("excluded_apps")))
+        self.refresh_engine()
+
+    # ---------- lưu cài đặt ----------
+    def _save_apps(self):
+        names = re.split(r"[\n,;]+", self.apps_text.get("1.0", "end"))
+        self.c.set_excluded_apps(names)
+
+    def _save_email(self):
+        email = self.email_var.get().strip()
+        if email and not _EMAIL.fullmatch(email):
+            self.set_status("Email chưa đúng định dạng, chưa lưu.", error=True)
+            return
+        if email != self.c.get("mymemory_email"):
+            self.c.set_option("mymemory_email", email)
+            self.set_status("Đã lưu email MyMemory." if email else "Đã xóa email MyMemory.")
+
+    def _toggle_backup_visibility(self):
+        for entry in self.backup_entries:
+            entry.configure(show="" if self.show_backup.get() else "•")
+
+    def _backup_keys(self):
+        main = self.key_var.get().strip()
+        result = []
+        for var in self.backup_vars:
+            key = var.get().strip()
+            if key and key != main and key not in result:
+                result.append(key)
+        return result
+
+    def _save_gemini(self):
+        changes = {
+            "gemini_api_key": self.key_var.get().strip(),
+            "gemini_backup_keys": self._backup_keys(),
+            "gemini_model": model_from_label(self.model_var.get()),
+            "domain": self.domain_var.get().strip(),
+        }
+        changes = {key: value for key, value in changes.items() if value != self.c.get(key)}
+        if changes:
+            self.c.set_gemini(**changes)
+            self.refresh_engine()
+
+    def check_key(self):
+        """Kiểm tra key chính và mọi key dự phòng (mỗi key tốn 1 lượt)."""
+        self._save_gemini()
+        model = self.c.get("gemini_model")
+        keys = [("Key chính", self.c.get("gemini_api_key"))] + [
+            (f"Dự phòng {i}", key) for i, key in enumerate(self.c.get("gemini_backup_keys"), 1)]
+        keys = [(label, key) for label, key in keys if key]
+        if not keys:
+            self.set_status("Chưa nhập API key Gemini.", error=True)
+            return
+        self.check_button.configure(state="disabled")
+        self.set_status("Đang kiểm tra key Gemini…")
+
+        def work():
+            results = [(label, *self.c.check_gemini(key, model)) for label, key in keys]
+            ok = all(passed for _, passed, _ in results)
+            message = "\n".join(f"{label}: {text}" for label, _, text in results)
+
+            def done():
+                self.check_button.configure(state="normal")
+                self.set_status(message, error=not ok)
+                self.refresh_engine()
+
+            self.c.ui_call(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def reset(self):
+        if not messagebox.askyesno(APP_NAME, "Khôi phục toàn bộ cài đặt về mặc định?\n"
+                                   "API key Gemini và email đã nhập sẽ bị xóa.", parent=self.root):
+            return
+        errors = self.c.reset_defaults()
+        self.refresh_all()
+        self.set_status("Đã khôi phục cài đặt mặc định.")
+        self.show_hotkey_errors(errors)
+
+    # ---------- hướng dẫn / thông tin ----------
+    def show_help(self):
+        vi, en, toggle = (hotkeys.display(self.c.get(k)) for k in ("hotkey_vi", "hotkey_en", "hotkey_toggle"))
+        messagebox.showinfo(f"Hướng dẫn – {APP_NAME}", (
+            "Cách dùng:\n"
+            "1. Bôi đen văn bản và nhấn nhanh Ctrl+C hai lần. Copy một lần là copy bình thường, "
+            "không dịch. (Nếu chọn \"Dịch khi: Mỗi lần copy\" thì chỉ cần nhấn một lần.)\n"
+            "2. Chờ icon ở khay hệ thống tô xanh đủ 100%: clipboard lúc này là bản dịch.\n"
+            "3. Nhấn Ctrl+V để dán bản dịch.\n\n"
+            "Chế độ dịch:\n"
+            "• Tự động hai chiều (A): tiếng Việt → tiếng Anh, ngôn ngữ khác → tiếng Việt.\n"
+            "• Sang tiếng Việt (V) / Sang tiếng Anh (E): luôn dịch theo một chiều.\n"
+            "• Tắt (–): copy bình thường, không dịch.\n\n"
+            "Phím tắt:\n"
+            f"• {vi}: chuyển sang chế độ Sang tiếng Việt và dịch luôn clipboard.\n"
+            f"• {en}: chuyển sang chế độ Sang tiếng Anh và dịch luôn clipboard.\n"
+            f"• {toggle}: tắt dịch / bật lại chế độ trước đó.\n"
+            "• Bấm trái vào icon: tắt / bật dịch. Chuột phải: menu.\n\n"
+            "Dịch theo lĩnh vực:\n"
+            "Nhập API key Gemini ở phần Mở rộng rồi chọn Lĩnh vực. Không có key thì app "
+            "dùng Google Dịch (không theo lĩnh vực).\n\n"
+            "Tiết kiệm lượt Gemini: chỉ lần nhấn Ctrl+C hai lần mới gọi Gemini; copy lại đoạn đã dịch "
+            "trong lúc app đang chạy thì không tốn lượt. Số lượt đã dùng hiện ở phần Điều khiển.\n\n"
+            "Lưu ý: nếu chọn \"Dịch khi: Mỗi lần copy\", mọi văn bản bạn copy đều bị thay bằng bản "
+            "dịch; muốn copy–dán bình thường, hãy tắt dịch trước."), parent=self.root)
+
+    def show_about(self):
+        messagebox.showinfo(f"Thông tin – {APP_NAME}", (
+            f"{APP_NAME} {APP_VERSION}\n"
+            "Dịch nhanh nội dung clipboard giữa tiếng Việt và các ngôn ngữ khác.\n\n"
+            "Quyền riêng tư: khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ dịch "
+            "(Gemini nếu bạn nhập API key, Google Dịch, hoặc MyMemory khi Google bận). "
+            "App không lưu nội dung bạn copy. Nội dung từ trình quản lý mật khẩu và chuỗi giống "
+            "mật khẩu được bỏ qua theo cài đặt Bảo vệ dữ liệu.\n\n"
+            f"Cài đặt: {self.c.config_path}\n"
+            f"Nhật ký lỗi: {self.c.log_path()}"), parent=self.root)
