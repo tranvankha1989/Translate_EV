@@ -5,6 +5,7 @@ import re
 import threading
 import tkinter as tk
 import webbrowser
+from ctypes import wintypes
 from tkinter import messagebox, ttk
 
 import hotkeys
@@ -134,6 +135,8 @@ class ControlPanel:
         self.checking = False
         self._tip = None
         self._tip_job = None
+        self._toast = None
+        self._toast_job = None
         self._update_dialog = None
         self._blink_job = None
         self._blink_on = False
@@ -323,20 +326,56 @@ class ControlPanel:
 
     # ---------- hiển thị ----------
     def show(self):
+        """Mở Bảng điều khiển ở giữa màn hình (đang mở sẵn thì chỉ đưa lên trên, không dời chỗ)."""
+        was_hidden = self.root.state() == "withdrawn"
         self.refresh_all()
-        self.root.deiconify()
-        if not self.positioned:
+        center = was_hidden or not self.positioned
+        if center:
             self.root.update_idletasks()
-            x = (self.root.winfo_screenwidth() - self.root.winfo_reqwidth()) // 2
-            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) // 3
-            self.root.geometry(f"+{max(0, x)}+{max(0, y)}")
+            self._center(self.root.winfo_reqwidth(), self.root.winfo_reqheight())
             self.positioned = True
+        self.root.deiconify()
+        if center:
+            self._center_visible()
         self.root.lift()
         self.root.attributes("-topmost", True)
         self.root.after(200, lambda: self.root.attributes("-topmost", False))
         self.root.focus_force()
 
+    def _center(self, width, height):
+        x = (self.root.winfo_screenwidth() - width) // 2
+        y = (self.root.winfo_screenheight() - height) // 2
+        self.root.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+    def _center_visible(self):
+        """Căn phần cửa sổ nhìn thấy vào giữa vùng làm việc (màn hình trừ thanh taskbar).
+
+        Windows 10/11 có viền trong suốt quanh cửa sổ nên phải đo phần nhìn thấy qua DWM.
+        """
+        user32, dwmapi = ctypes.windll.user32, ctypes.windll.dwmapi
+        work = wintypes.RECT()
+        if not user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work), 0):  # SPI_GETWORKAREA
+            return
+        for _ in range(2):
+            self.root.update_idletasks()
+            hwnd = int(self.root.wm_frame(), 16)
+            rect = wintypes.RECT()
+            if dwmapi.DwmGetWindowAttribute(hwnd, 9, ctypes.byref(rect), ctypes.sizeof(rect)) != 0:
+                if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                    return
+            dx = (work.left + work.right) // 2 - (rect.left + rect.right) // 2
+            dy = (work.top + work.bottom) // 2 - (rect.top + rect.bottom) // 2
+            if abs(dx) <= 1 and abs(dy) <= 1:
+                return
+            match = re.search(r"([+-]-?\d+)([+-]-?\d+)$", self.root.geometry())
+            if not match:
+                return
+            x, y = int(match.group(1)) + dx, int(match.group(2)) + dy
+            self.root.geometry(f"+{max(work.left, x)}+{max(work.top, y)}")
+
     def hide(self):
+        self._hide_toast()
+        self._hide_badge_tip()
         self._save_apps()
         self._save_email()
         self._save_gemini()
@@ -618,21 +657,68 @@ class ControlPanel:
 
             def done():
                 self.checking = False
-                title = f"Kiểm tra cập nhật – {APP_NAME}"
                 if error:
                     self._badge_normal()
-                    messagebox.showwarning(title, f"Không kiểm tra được bản cập nhật.\n{error}", parent=self.root)
+                    self.toast(f"Không kiểm tra được bản cập nhật. {error}", kind="error", duration=5000)
                 elif release:
-                    # show_update_available đã được gọi (qua check_update): dòng phiên bản đang nhấp nháy.
-                    self.show_update_available(release)
-                    self.set_status(f"Có bản mới {release.version}: bấm vào dòng phiên bản nhấp nháy để nâng cấp.")
+                    self.show_update_available(release)  # dòng phiên bản nhấp nháy
+                    self.toast(f"Có bản mới v{release.version}. Bấm vào dòng phiên bản để nâng cấp.", kind="info",
+                               duration=4500)
                 else:
                     self._badge_normal()
-                    messagebox.showinfo(title, f"Bạn đang dùng bản mới nhất ({APP_VERSION}).", parent=self.root)
+                    self.toast(f"Bạn đang sử dụng phiên bản mới nhất (v{APP_VERSION}).")
 
             self.c.ui_call(done)
 
         threading.Thread(target=work, daemon=True).start()
+
+    # ---------- thông báo nhỏ ở góc, tự ẩn sau vài giây ----------
+    TOAST_STYLES = {  # nền, màu viền/biểu tượng, biểu tượng
+        "success": ("#1f2d27", "#3fb950", "✓"),
+        "info": ("#1f2733", "#58a6ff", "↑"),
+        "error": ("#2d1f1f", "#f85149", "!"),
+    }
+
+    def toast(self, text, kind="success", duration=3500):
+        """Thông báo nhỏ ở góc trên bên phải Bảng điều khiển; tự mờ dần rồi ẩn, bấm vào để ẩn ngay."""
+        self._hide_toast()
+        bg, accent, symbol = self.TOAST_STYLES[kind]
+        win = tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        box = tk.Frame(win, bg=bg, highlightthickness=1, highlightbackground=accent, highlightcolor=accent)
+        box.pack()
+        tk.Label(box, text=symbol, bg=bg, fg=accent, font=("Segoe UI", 11, "bold")).pack(
+            side="left", padx=(10, 6), pady=7)
+        tk.Label(box, text=text, bg=bg, fg="#e6edf3", font=("Segoe UI", 9), justify="left",
+                 wraplength=max(200, self.root.winfo_width() - 70)).pack(side="left", padx=(0, 12), pady=7)
+        for widget in (win, box, *box.winfo_children()):
+            widget.bind("<Button-1>", lambda e: self._hide_toast())
+        win.update_idletasks()
+        x = self.root.winfo_rootx() + self.root.winfo_width() - win.winfo_reqwidth() - 10
+        y = self.version_badge.winfo_rooty() + self.version_badge.winfo_height() + 6
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self._toast = win
+        self._toast_job = self.root.after(duration, lambda: self._fade_toast(win, 1.0))
+
+    def _fade_toast(self, win, alpha):
+        if win is not self._toast or not win.winfo_exists():
+            return
+        alpha -= 0.12
+        if alpha <= 0:
+            self._hide_toast()
+            return
+        win.attributes("-alpha", alpha)
+        self._toast_job = self.root.after(30, lambda: self._fade_toast(win, alpha))
+
+    def _hide_toast(self):
+        if self._toast_job:
+            self.root.after_cancel(self._toast_job)
+            self._toast_job = None
+        if self._toast is not None:
+            if self._toast.winfo_exists():
+                self._toast.destroy()
+            self._toast = None
 
     def start_update(self, release):
         """Bấm một lần là cập nhật: tải, kiểm tra, cài rồi tự khởi động lại (tiến độ hiện ngay tại dòng phiên bản)."""
@@ -786,7 +872,7 @@ def ask_install_options(default_folder, normalize, needs_admin, window_icon=None
     root.protocol("WM_DELETE_WINDOW", lambda: finish(None))
     root.update_idletasks()
     x = (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2
-    y = (root.winfo_screenheight() - root.winfo_reqheight()) // 3
+    y = (root.winfo_screenheight() - root.winfo_reqheight()) // 2
     root.geometry(f"+{max(0, x)}+{max(0, y)}")
     root.attributes("-topmost", True)
     root.after(300, lambda: root.attributes("-topmost", False))
