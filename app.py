@@ -18,11 +18,13 @@ from queue import Empty, SimpleQueue
 
 import pyperclip
 import pystray
+import requests
 
 import filters
 import hotkeys
 import icons
 import translator
+import updater
 from config import APP_NAME, Settings, model_label
 from translator import TranslationCancelled, is_vietnamese, translate
 
@@ -730,6 +732,78 @@ class Controller:
     def quit(self):
         request_quit()
 
+    # ----- cập nhật qua GitHub -----
+    can_self_update = staticmethod(updater.can_self_update)
+    releases_page = updater.RELEASES_PAGE
+
+    def check_update(self):
+        """Chạy trong luồng phụ. Trả về bản mới hoặc None; lỗi mạng thì ném UpdateError."""
+        try:
+            release = updater.check()
+        except (requests.RequestException, ValueError) as e:
+            raise updater.UpdateError(f"Không kết nối được GitHub: {e.__class__.__name__}") from e
+        set_available_release(release)
+        return release
+
+    def install_update(self, release, on_progress=None):
+        """Chạy trong luồng phụ: tải, kiểm tra rồi giao cho bản mới tự cài; app này thoát."""
+        exe_path = sys.executable
+        target = updater.update_path(exe_path)
+        try:
+            updater.download(release, target, on_progress)
+        except (requests.RequestException, OSError) as e:
+            raise updater.UpdateError(f"Không tải được bản cập nhật: {e.__class__.__name__}") from e
+        updater.start_install(target, exe_path)
+        log(f"Cập nhật: đã tải bản {release.version}, đang cài đặt")
+        request_quit()
+
+
+available_release = None
+_notified_version = None
+
+
+def set_available_release(release):
+    """Ghi nhận bản mới: hiện mục menu, dòng báo trong Bảng điều khiển và thông báo một lần."""
+    global available_release, _notified_version
+    available_release = release
+    if icon:
+        icon.update_menu()
+    ui_call(lambda: panel and panel.show_update_available(release))
+    if release and release.version != _notified_version:
+        _notified_version = release.version
+        notify(f"Có bản cập nhật {APP_NAME} {release.version}.\n"
+               "Chuột phải vào icon → Cập nhật, hoặc mở Bảng điều khiển.")
+
+
+def update_checker():
+    """Tự kiểm tra bản mới: 1 phút sau khi mở app, sau đó mỗi ngày một lần."""
+    stop = threading.Event()
+    delay = 60
+    while not stop.wait(delay):
+        delay = 24 * 3600
+        if not settings["auto_update"]:
+            continue
+        try:
+            release = updater.check()
+        except Exception as e:  # mất mạng, GitHub lỗi...: thử lại ngày mai
+            log(f"Không kiểm tra được bản cập nhật: {e!r}")
+            continue
+        if release:
+            set_available_release(release)
+
+
+def handle_update_args(args):
+    """Xử lý tham số của quy trình cập nhật. Trả về True nếu tiến trình này chỉ để cài đặt."""
+    if "install-update" in args:
+        try:
+            updater.install_update(args["install-update"], args.get("wait-pid", []))
+        except Exception as e:
+            log(f"Cài bản cập nhật thất bại: {e!r}")
+        return True
+    if "cleanup" in args:
+        threading.Thread(target=updater.cleanup, args=(args["cleanup"],), daemon=True).start()
+    return False
+
 
 def build_menu():
     def label(text, key):
@@ -744,15 +818,23 @@ def build_menu():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Bảng điều khiển…", lambda: ui_call(show_panel)),
         pystray.MenuItem("Hướng dẫn", lambda: ui_call(lambda: panel and panel.show_help())),
+        pystray.MenuItem(
+            lambda item: f"Cập nhật lên bản {available_release.version}…" if available_release else "Cập nhật",
+            lambda: ui_call(lambda: panel and available_release and panel.prompt_update(available_release)),
+            visible=lambda item: available_release is not None,
+        ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Thoát", request_quit),
     )
 
 
-def on_ready(icon_, hotkey_errors):
+def on_ready(icon_, hotkey_errors, updated_to=None):
     icon_.visible = True
     threading.Thread(target=message_listener, daemon=True).start()
     threading.Thread(target=watcher, daemon=True).start()
+    threading.Thread(target=update_checker, daemon=True).start()
+    if updated_to:
+        notify(f"Đã cập nhật {APP_NAME} lên phiên bản {updated_to}.")
     if hotkey_errors:
         notify("Phím tắt không dùng được: " + "; ".join(
             f"{hotkeys.display(settings[key])} {why}" for key, why in hotkey_errors.items())
@@ -775,6 +857,9 @@ def pump_ui():
 
 def main():
     global settings, mode, seen_sequence, hotkey_manager, icon, panel, tk_root
+    args = updater.parse_args(sys.argv[1:])
+    if handle_update_args(args):
+        return  # tiến trình cài bản cập nhật: chép file xong là thoát
     if not acquire_single_instance():
         return  # đã có bản đang chạy: bản đó sẽ mở Bảng điều khiển
     set_dpi_awareness()
@@ -803,7 +888,7 @@ def main():
     panel = ControlPanel(tk_root, Controller(), window_icon)
     icon = pystray.Icon("translate-vn", icons.tray_icon(mode, 0),
                         f"{APP_NAME}: {MODE_LABEL[mode]}", build_menu())
-    icon.run_detached(setup=lambda icon_: on_ready(icon_, hotkey_errors))
+    icon.run_detached(setup=lambda icon_: on_ready(icon_, hotkey_errors, args.get("updated")))
     if first_run or settings["show_panel_on_start"]:
         tk_root.after(300, show_panel)
     tk_root.after(100, pump_ui)

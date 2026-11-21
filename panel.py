@@ -147,6 +147,17 @@ class ControlPanel:
         self.engine_label = ttk.Label(basic, style="Hint.TLabel", wraplength=300)
         self.engine_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
+        # Dòng báo có bản cập nhật (ẩn cho tới khi tìm thấy bản mới trên GitHub).
+        self.update_frame = ttk.Frame(basic)
+        self.update_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.update_frame.columnconfigure(0, weight=1)
+        self.update_label = ttk.Label(self.update_frame, style="Link.TLabel")
+        self.update_label.grid(row=0, column=0, sticky="w")
+        self.update_button = ttk.Button(self.update_frame, text="Cập nhật")
+        self.update_button.grid(row=0, column=1, sticky="e")
+        self.update_frame.grid_remove()
+        self.update_release = None
+
         system = ttk.Frame(outer)
         system.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self._check(system, "autostart", "Khởi động cùng Windows").grid(row=0, column=0, sticky="w")
@@ -272,6 +283,12 @@ class ControlPanel:
         self._check(other, "notify_errors", "Thông báo khi không dịch được").grid(row=3, column=0, sticky="w")
         ttk.Button(other, text="Mở thư mục log", command=self.c.open_log_folder).grid(
             row=4, column=0, sticky="w", pady=(4, 0))
+        ttk.Separator(other).grid(row=5, column=0, sticky="ew", pady=8)
+        ttk.Label(other, text=f"Phiên bản hiện tại: {APP_VERSION}").grid(row=6, column=0, sticky="w")
+        self._check(other, "auto_update", "Tự động kiểm tra bản cập nhật (mỗi ngày)").grid(
+            row=7, column=0, sticky="w")
+        self.check_update_button = ttk.Button(other, text="Kiểm tra cập nhật", command=self.check_updates_now)
+        self.check_update_button.grid(row=8, column=0, sticky="w", pady=(4, 0))
 
     def _check(self, parent, key, text):
         var = tk.BooleanVar()
@@ -420,6 +437,84 @@ class ControlPanel:
         self.show_hotkey_errors(errors)
 
     # ---------- hướng dẫn / thông tin ----------
+    # ---------- cập nhật qua GitHub ----------
+    def show_update_available(self, release):
+        self.update_release = release
+        if not release:
+            self.update_frame.grid_remove()
+            return
+        self.update_label.configure(text=f"Có bản mới {release.version}")
+        self.update_button.configure(command=lambda: self.prompt_update(release))
+        self.update_frame.grid()
+
+    def check_updates_now(self):
+        self.check_update_button.configure(state="disabled")
+        self.set_status("Đang kiểm tra bản cập nhật trên GitHub…")
+
+        def work():
+            try:
+                release, error = self.c.check_update(), None
+            except Exception as e:  # UpdateError và lỗi mạng
+                release, error = None, str(e)
+
+            def done():
+                self.check_update_button.configure(state="normal")
+                if error:
+                    self.set_status(error, error=True)
+                elif release:
+                    self.set_status(f"Có bản mới {release.version}.")
+                    self.prompt_update(release)
+                else:
+                    self.set_status(f"Bạn đang dùng bản mới nhất ({APP_VERSION}).")
+
+            self.c.ui_call(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def prompt_update(self, release):
+        self.show()
+        notes = release.notes[:900] + ("…" if len(release.notes) > 900 else "")
+        if not self.c.can_self_update():
+            if messagebox.askyesno(
+                    f"Cập nhật – {APP_NAME}",
+                    f"Có bản mới {release.version} (bạn đang dùng {APP_VERSION}).\n\n{notes}\n\n"
+                    "Bạn đang chạy từ mã nguồn nên app không tự cập nhật được. Mở trang tải về?",
+                    parent=self.root):
+                webbrowser.open(release.page_url)
+            return
+        if not messagebox.askyesno(
+                f"Cập nhật – {APP_NAME}",
+                f"Có bản mới {release.version} (bạn đang dùng {APP_VERSION}).\n\n{notes}\n\n"
+                "Cập nhật ngay? App sẽ tải bản mới từ GitHub, kiểm tra rồi tự khởi động lại.",
+                parent=self.root):
+            return
+        self.update_button.configure(state="disabled")
+        self.check_update_button.configure(state="disabled")
+        self.set_status("Đang tải bản cập nhật… 0%")
+
+        def progress(fraction):
+            self.c.ui_call(lambda: self.set_status(f"Đang tải bản cập nhật… {int(fraction * 100)}%"))
+
+        def work():
+            try:
+                self.c.install_update(release, progress)
+                self.c.ui_call(lambda: self.set_status("Đang cài bản cập nhật, app sẽ khởi động lại…"))
+            except Exception as e:
+                message = str(e)
+
+                def failed():
+                    self.update_button.configure(state="normal")
+                    self.check_update_button.configure(state="normal")
+                    self.set_status(message, error=True)
+                    if messagebox.askyesno(f"Cập nhật – {APP_NAME}",
+                                           f"{message}\n\nMở trang GitHub để tải bản mới thủ công?",
+                                           parent=self.root):
+                        webbrowser.open(release.page_url)
+
+                self.c.ui_call(failed)
+
+        threading.Thread(target=work, daemon=True).start()
+
     def show_help(self):
         vi, en, toggle = (hotkeys.display(self.c.get(k)) for k in ("hotkey_vi", "hotkey_en", "hotkey_toggle"))
         messagebox.showinfo(f"Hướng dẫn – {APP_NAME}", (

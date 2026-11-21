@@ -11,7 +11,8 @@ import threading
 from ctypes import wintypes
 
 APP_NAME = "Translate Vietnam"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.0"  # tăng số này trước mỗi lần chạy release.bat
+UPDATE_REPO = "tranvankha1989/Translate_EV"  # repo GitHub chứa các bản phát hành
 
 MODES = ("off", "auto", "vi", "en")
 DOMAINS = [
@@ -61,6 +62,7 @@ DEFAULTS = {
     "gemini_model": GEMINI_MODELS[0],
     "domain": DOMAINS[0],
     "notify_errors": True,
+    "auto_update": True,  # tự kiểm tra bản mới trên GitHub mỗi ngày
     "gemini_usage_day": "",  # ngày tính hạn mức (giờ Thái Bình Dương) của bộ đếm bên dưới
     "gemini_usage_count": 0,  # chỉ lưu số lượt, không lưu nội dung
 }

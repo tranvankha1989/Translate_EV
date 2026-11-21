@@ -10,7 +10,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-py -3.11 -m unittest test_features test_translator test_app_log
+py -3.11 -m unittest test_features test_translator test_app_log test_updater
 if errorlevel 1 (
     echo Test that bai, dung build.
     pause

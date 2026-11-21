@@ -55,6 +55,23 @@ Lưu ý:
 
 Khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ dịch trực tuyến (Gemini nếu có API key, Google Dịch, hoặc MyMemory khi Google bận). Ứng dụng không lưu nội dung bạn copy. Có thể chỉnh các bộ lọc trong Mở rộng → **Bảo vệ dữ liệu**.
 
+## Cập nhật
+
+Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, ứng dụng hiện thông báo; bấm **Cập nhật** để ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại. Không cần cài git hay công cụ nào khác.
+
+**Không cần gỡ cài đặt, cài đặt không bị mất.** Ứng dụng là một file exe chạy trực tiếp (không có trình cài đặt). Toàn bộ cài đặt — chế độ, lĩnh vực, phím tắt, API key, danh sách loại trừ — được lưu riêng trong `%APPDATA%\TranslateVietnam\config.json`, nên thay file exe (tự động hay thủ công) vẫn giữ nguyên mọi thứ.
+
+### Đang dùng bản cũ chưa có tính năng tự cập nhật
+
+Bản cũ không tự biết có bản mới, nên cần thay file **một lần**:
+
+1. Chuột phải vào icon ở khay hệ thống → **Thoát**.
+2. Tải `TranslateVietnam.exe` mới trong [Releases](https://github.com/tranvankha1989/Translate_EV/releases/latest).
+3. Chép đè lên file cũ (cùng thư mục, cùng tên) để chế độ chạy cùng Windows vẫn trỏ đúng file. Nếu muốn đặt ở thư mục khác, hãy xóa file cũ đi.
+4. Chạy `TranslateVietnam.exe`. Từ đây trở đi ứng dụng tự cập nhật.
+
+Lưu ý từ bản 1.0.0: mặc định cần **nhấn nhanh `Ctrl+C` hai lần** mới dịch. Muốn dịch mỗi lần copy như bản cũ, chọn *Dịch khi: Mỗi lần copy* trong Bảng điều khiển.
+
 ## Cài đặt và nhật ký lỗi
 
 - Cài đặt: `%APPDATA%\TranslateVietnam\config.json`.
@@ -74,7 +91,7 @@ run.bat
 Chạy test:
 
 ```bat
-py -3.11 -m unittest test_features test_translator test_app_log
+py -3.11 -m unittest test_features test_translator test_app_log test_updater
 ```
 
 ## Tự build EXE
@@ -84,6 +101,16 @@ build_exe.bat
 ```
 
 Script cài thư viện, chạy test, tạo icon rồi build `dist\TranslateVietnam.exe`. Bản build là file độc lập, máy người dùng không cần cài Python.
+
+## Phát hành bản mới (dành cho nhà phát triển)
+
+Cần Python 3.11, git và [GitHub CLI](https://cli.github.com) đã đăng nhập (`gh auth login`) — chỉ trên máy phát hành, người dùng không cần.
+
+1. Tăng `APP_VERSION` trong `config.py` (ví dụ `1.0.0` → `1.0.1`).
+2. (Tùy chọn) Ghi nội dung thay đổi vào `release_notes.md`; nếu không có, GitHub tự tạo ghi chú từ các commit.
+3. Commit thay đổi, rồi chạy `release.bat`.
+
+Script đẩy code lên GitHub, chạy test, build exe, tạo file `TranslateVietnam.exe.sha256` và tạo bản phát hành `v<phiên bản>` kèm hai file đó. Ứng dụng của người dùng sẽ tự báo có bản mới trong vòng một ngày.
 
 ## Giấy phép
 
