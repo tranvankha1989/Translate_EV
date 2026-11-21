@@ -132,6 +132,8 @@ class ControlPanel:
         self.update_release = None
         self.updating = False
         self.checking = False
+        self._tip = None
+        self._tip_job = None
         self._update_dialog = None
         self._blink_job = None
         self._blink_on = False
@@ -470,6 +472,43 @@ class ControlPanel:
     def _badge_hover(self, inside):
         if not self.update_release and not self.updating and not self.checking:
             self.version_badge.configure(fg="#0b57d0" if inside else "#666666")
+        if inside:
+            self._tip_job = self.root.after(400, self._show_badge_tip)
+        else:
+            self._hide_badge_tip()
+
+    def _badge_tip_text(self):
+        if self.updating or self.checking:
+            return None
+        if self.update_release:
+            return "Bấm để xem có gì mới và nâng cấp"
+        return "Bấm để kiểm tra bản mới"
+
+    def _show_badge_tip(self):
+        """Gợi ý nhỏ dưới dòng phiên bản để người dùng biết dòng này bấm được."""
+        self._tip_job = None
+        text = self._badge_tip_text()
+        if not text or self._tip is not None:
+            return
+        tip = tk.Toplevel(self.root)
+        tip.overrideredirect(True)
+        tip.attributes("-topmost", True)
+        tk.Label(tip, text=text, bg="#fffbe6", fg="#333333", bd=1, relief="solid",
+                 font=("Segoe UI", 9), padx=6, pady=2).pack()
+        tip.update_idletasks()
+        badge = self.version_badge
+        x = badge.winfo_rootx() + badge.winfo_width() - tip.winfo_reqwidth()
+        y = badge.winfo_rooty() + badge.winfo_height() + 4
+        tip.geometry(f"+{max(0, x)}+{y}")
+        self._tip = tip
+
+    def _hide_badge_tip(self):
+        if self._tip_job:
+            self.root.after_cancel(self._tip_job)
+            self._tip_job = None
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
 
     def _stop_blink(self):
         if self._blink_job:
@@ -499,6 +538,7 @@ class ControlPanel:
 
     def _badge_clicked(self):
         """Có bản mới: hỏi nâng cấp. Chưa có: kiểm tra trên GitHub."""
+        self._hide_badge_tip()
         if self.updating or self.checking:
             return
         if self.update_release:

@@ -11,7 +11,7 @@ import threading
 from ctypes import wintypes
 
 APP_NAME = "Translate Vietnam"
-APP_VERSION = "1.0.3"  # tăng số này trước mỗi lần chạy release.bat
+APP_VERSION = "1.0.4"  # tăng số này trước mỗi lần chạy release.bat
 UPDATE_REPO = "tranvankha1989/Translate_EV"  # repo GitHub chứa các bản phát hành
 
 MODES = ("off", "auto", "vi", "en")
