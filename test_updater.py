@@ -144,6 +144,18 @@ class DownloadTests(unittest.TestCase):
             updater.download(release, self.dest, session=FakeSession({}))
 
 
+class WhatsNewTests(unittest.TestCase):
+    def test_only_whats_new_section_as_plain_text(self):
+        notes = ("## Có gì mới\n\n- Dòng **phiên bản** nhấp nháy.\n- Xem [trang](https://x.y) và `F8`.\n\n"
+                 "## Cách cập nhật\n\n- Bấm Cập nhật.")
+        self.assertEqual(updater.whats_new(notes), "• Dòng phiên bản nhấp nháy.\n• Xem trang và F8.")
+
+    def test_without_section_or_notes(self):
+        self.assertEqual(updater.whats_new("## What's Changed\r\n* Fix by someone"),
+                         "What's Changed\n• Fix by someone")
+        self.assertEqual(updater.whats_new(""), "Sửa lỗi và cải thiện.")
+
+
 class ArgsTests(unittest.TestCase):
     def test_parse_args(self):
         args = updater.parse_args(["--install-update", r"C:\Apps\TranslateVietnam.exe", "--wait-pid", "12,34"])

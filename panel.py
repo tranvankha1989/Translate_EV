@@ -7,6 +7,7 @@ import webbrowser
 from tkinter import messagebox, ttk
 
 import hotkeys
+import updater
 from config import APP_NAME, APP_VERSION, DOMAINS, GEMINI_MODELS, MAX_BACKUP_KEYS, model_from_label, model_label
 
 MODE_CHOICES = [("auto", "Tự động hai chiều"), ("vi", "Sang tiếng Việt"), ("en", "Sang tiếng Anh"), ("off", "Tắt")]
@@ -127,6 +128,7 @@ class ControlPanel:
         self.version_badge.bind("<Button-1>", lambda e: self._badge_clicked())
         self.update_release = None
         self.updating = False
+        self._update_dialog = None
         self._blink_job = None
         self._blink_on = False
         self._badge_normal()
@@ -480,7 +482,66 @@ class ControlPanel:
 
     def _badge_clicked(self):
         if self.update_release and not self.updating:
-            self.start_update(self.update_release)
+            self.confirm_update(self.update_release)
+
+    def confirm_update(self, release):
+        """Cửa sổ "Có bản mới": hiện tính năng mới, người dùng bấm "Cập nhật ngay" để cập nhật."""
+        if self.updating:
+            return
+        if self._update_dialog is not None and self._update_dialog.winfo_exists():
+            self._update_dialog.lift()
+            return
+        self.show()
+        self_update = self.c.can_self_update()
+        win = tk.Toplevel(self.root)
+        self._update_dialog = win
+        win.title(f"Cập nhật – {APP_NAME}")
+        win.resizable(False, False)
+        win.transient(self.root)
+        frame = ttk.Frame(win, padding=14)
+        frame.grid(sticky="nsew")
+        ttk.Label(frame, text=f"Có bản mới {release.version}", font=("Segoe UI", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text=f"Bạn đang dùng bản {APP_VERSION}.", style="Hint.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(frame, text="Có gì mới:").grid(row=2, column=0, columnspan=2, sticky="w")
+        notes = tk.Text(frame, width=54, height=9, wrap="word", font="TkDefaultFont", relief="flat",
+                        padx=8, pady=6, highlightthickness=1, highlightbackground="#c0c0c0")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=notes.yview)
+        notes.configure(yscrollcommand=scroll.set)
+        notes.insert("1.0", updater.whats_new(release.notes))
+        notes.configure(state="disabled")
+        notes.grid(row=3, column=0, sticky="nsew", pady=(2, 8))
+        scroll.grid(row=3, column=1, sticky="ns", pady=(2, 8))
+        ttk.Label(frame, style="Hint.TLabel", wraplength=400, text=(
+            "App sẽ tải bản mới từ GitHub, kiểm tra an toàn rồi tự khởi động lại. Cài đặt của bạn được giữ nguyên."
+            if self_update else
+            "Bạn đang chạy từ mã nguồn nên app không tự cập nhật được; nút bên dưới mở trang tải bản mới.")).grid(
+            row=4, column=0, columnspan=2, sticky="w")
+
+        def close():
+            win.grab_release()
+            win.destroy()
+            self._update_dialog = None
+
+        def update_now():
+            close()
+            self.start_update(release)
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ok = ttk.Button(buttons, text="Cập nhật ngay" if self_update else "Mở trang tải", command=update_now)
+        ok.grid(row=0, column=0)
+        ttk.Button(buttons, text="Để sau", command=close).grid(row=0, column=1, padx=(6, 0))
+        win.bind("<Return>", lambda e: update_now())
+        win.bind("<Escape>", lambda e: close())
+        win.protocol("WM_DELETE_WINDOW", close)
+        win.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - win.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + 30
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        win.grab_set()
+        ok.focus_set()
 
     def check_updates_now(self):
         self.check_update_button.configure(state="disabled")
@@ -497,7 +558,8 @@ class ControlPanel:
                 if error:
                     self.set_status(error, error=True)
                 elif release:
-                    self.set_status(f"Có bản mới {release.version}. Bấm dòng phiên bản ở trên cùng để cập nhật.")
+                    self.set_status(f"Có bản mới {release.version}.")
+                    self.confirm_update(release)
                 else:
                     self.set_status(f"Bạn đang dùng bản mới nhất ({APP_VERSION}).")
 

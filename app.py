@@ -820,8 +820,7 @@ def build_menu():
         pystray.MenuItem("Hướng dẫn", lambda: ui_call(lambda: panel and panel.show_help())),
         pystray.MenuItem(
             lambda item: f"Cập nhật lên bản {available_release.version}…" if available_release else "Cập nhật",
-            lambda: ui_call(lambda: panel and available_release and (
-                panel.show(), panel.start_update(available_release))),
+            lambda: ui_call(lambda: panel and available_release and panel.confirm_update(available_release)),
             visible=lambda item: available_release is not None,
         ),
         pystray.Menu.SEPARATOR,

@@ -57,7 +57,7 @@ Khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ d
 
 ## Cập nhật
 
-Phiên bản đang dùng hiện ở dòng trên cùng của Bảng điều khiển. Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, dòng đó **nhấp nháy đỏ "↑ Cập nhật lên x.y.z"** — bấm vào là ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại, tiến độ hiện ngay tại chỗ. Không cần cài git hay công cụ nào khác.
+Phiên bản đang dùng hiện ở dòng trên cùng của Bảng điều khiển. Ứng dụng tự kiểm tra bản mới trên [GitHub Releases](https://github.com/tranvankha1989/Translate_EV/releases) mỗi ngày (tắt được trong Mở rộng → Khác). Khi có bản mới, dòng đó **nhấp nháy đỏ "↑ Cập nhật lên x.y.z"**. Bấm vào sẽ mở cửa sổ **Có bản mới** liệt kê các tính năng mới; bấm **Cập nhật ngay** là ứng dụng tự tải, kiểm tra mã SHA-256, thay file exe và khởi động lại, tiến độ hiện ngay tại dòng phiên bản (hoặc **Để sau**). Không cần cài git hay công cụ nào khác.
 
 **Không cần gỡ cài đặt, cài đặt không bị mất.** Ứng dụng là một file exe chạy trực tiếp (không có trình cài đặt). Toàn bộ cài đặt — chế độ, lĩnh vực, phím tắt, API key, danh sách loại trừ — được lưu riêng trong `%APPDATA%\TranslateVietnam\config.json`, nên thay file exe (tự động hay thủ công) vẫn giữ nguyên mọi thứ.
 
@@ -107,7 +107,7 @@ Script cài thư viện, chạy test, tạo icon rồi build `dist\TranslateViet
 Cần Python 3.11, git và [GitHub CLI](https://cli.github.com) đã đăng nhập (`gh auth login`) — chỉ trên máy phát hành, người dùng không cần.
 
 1. Tăng `APP_VERSION` trong `config.py` (ví dụ `1.0.0` → `1.0.1`).
-2. (Tùy chọn) Ghi nội dung thay đổi vào `release_notes.md`; nếu không có, GitHub tự tạo ghi chú từ các commit.
+2. (Tùy chọn) Ghi nội dung thay đổi vào `release_notes.md`; nếu không có, GitHub tự tạo ghi chú từ các commit. Nên có mục `## Có gì mới` (gạch đầu dòng `- ...`): cửa sổ cập nhật trong app hiển thị đúng mục này cho người dùng.
 3. Commit thay đổi, rồi chạy `release.bat`.
 
 Script đẩy code lên GitHub, chạy test, build exe, tạo file `TranslateVietnam.exe.sha256` và tạo bản phát hành `v<phiên bản>` kèm hai file đó. Ứng dụng của người dùng sẽ tự báo có bản mới trong vòng một ngày.

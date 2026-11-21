@@ -109,6 +109,23 @@ def check(session=None):
     return release if release and is_newer(release.version) else None
 
 
+def whats_new(notes):
+    """Đoạn "Có gì mới" trong ghi chú phát hành, đổi Markdown sang chữ thường để hiện trong app."""
+    lines = (notes or "").replace("\r\n", "\n").split("\n")
+    start = next((i for i, line in enumerate(lines) if re.match(r"#+\s*Có gì mới", line, re.I)), None)
+    if start is not None:  # chỉ lấy phần "Có gì mới", bỏ các phần hướng dẫn cài đặt
+        end = next((j for j in range(start + 1, len(lines)) if re.match(r"#+\s", lines[j])), len(lines))
+        lines = lines[start + 1:end]
+    result = []
+    for line in lines:
+        line = re.sub(r"^#+\s*", "", line)
+        line = re.sub(r"^\s*[-*]\s+", "• ", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        result.append(line.replace("**", "").replace("`", "").rstrip())
+    text = "\n".join(result).strip()
+    return re.sub(r"\n{3,}", "\n\n", text) or "Sửa lỗi và cải thiện."
+
+
 def parse_checksum(text):
     match = re.search(r"\b[0-9a-fA-F]{64}\b", text or "")
     return match.group(0).lower() if match else None
