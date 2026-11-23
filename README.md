@@ -17,6 +17,7 @@ Copy một lần vẫn là copy bình thường.
 - **Dịch theo lĩnh vực bằng AI Gemini** (tùy chọn): nhập API key Gemini và chọn lĩnh vực (mặc định *Kỹ thuật máy in công nghiệp*) để bản dịch dùng đúng thuật ngữ chuyên ngành. Không có key thì dùng Google Dịch.
 - Tự chuyển dịch vụ: Gemini hết lượt miễn phí hoặc lỗi → Google Dịch → MyMemory.
 - Dịch nhanh hơn: lúc mở app, ứng dụng kiểm tra sẵn API key và model Gemini, mở sẵn kết nối và giữ kết nối luôn mở, nên mỗi lần dịch không phải nối lại máy chủ (việc kiểm tra và giữ kết nối không tốn lượt Gemini).
+- Chống chậm bất thường: Gemini thỉnh thoảng trả lời rất chậm hoặc báo bận. Khi sau khoảng 2 giây chưa có kết quả, hoặc gặp lỗi tạm thời, app gửi thêm ngay một yêu cầu song song và lấy kết quả về trước (chỉ tốn thêm lượt trong những lần chậm đó). Lỗi và lần chậm được ghi vào nhật ký (không ghi nội dung).
 - **Bảo vệ dữ liệu**: không gửi đi dịch nội dung từ trình quản lý mật khẩu, chuỗi giống mật khẩu / mã token / URL / đường dẫn / email, và nội dung copy từ các app trong danh sách loại trừ.
 - Icon khay hiện chế độ (`A` / `V` / `E` / `–`) và tiến độ dịch tô màu từ trên xuống; hiện 100% khi bản dịch đã vào clipboard.
 - Con trỏ chuột hiện vòng xoay trong lúc đang dịch / sửa chính tả, xong thì trở lại bình thường. Đổi kiểu (vòng xoay, mũi tên kèm vòng xoay, không đổi) ở Mở rộng → **Khác**. App dùng đúng bộ và cỡ con trỏ của từng máy, luôn tự trả lại con trỏ sau tối đa 60 giây, khi thoát và khi mở lại sau lần bị tắt ngang.

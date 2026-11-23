@@ -292,7 +292,7 @@ class BackupKeyTests(unittest.TestCase):
         with patch.object(translator, "_session", return_value=DownSession()), \
                 patch.object(translator, "_google_cached", side_effect=lambda c, t: (f"google:{c}", "en")):
             self.assertEqual(translator.translate("hello", "vi"), "google:hello")
-        self.assertEqual(DownSession.calls, 1)
+        self.assertEqual(DownSession.calls, 2)  # thử lại ngay một lần với key chính, không dùng key dự phòng
         self.assertFalse(translator.gemini_ready())
 
     def test_cache_is_shared_between_keys(self):

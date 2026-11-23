@@ -11,7 +11,7 @@ import threading
 from ctypes import wintypes
 
 APP_NAME = "Translate Vietnam"
-APP_VERSION = "1.1.2"  # tăng số này trước mỗi lần chạy scripts\release.bat
+APP_VERSION = "1.1.3"  # tăng số này trước mỗi lần chạy scripts\release.bat
 UPDATE_REPO = "tranvankha1989/Translate_EV"  # repo GitHub chứa các bản phát hành
 AUTHOR_NAME = "Trần Văn Kha"
 AUTHOR_ZALO_URL = "https://zaloapp.com/qr/p/376biavcj0xw"  # nội dung mã QR Zalo trong assets\zalo_qr.png

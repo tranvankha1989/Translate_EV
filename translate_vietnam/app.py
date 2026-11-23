@@ -1263,6 +1263,7 @@ def main():
             log(f"Không cập nhật được mục cài đặt: {e!r}")
     mode = settings["mode"]
     busycursor.restore_if_left_over()
+    translator.on_event = log  # ghi lỗi / chậm của Gemini vào nhật ký (không ghi nội dung)
     translator.load_gemini_usage(settings["gemini_usage_day"], settings["gemini_usage_count"])
     apply_translator_settings()
     apply_autostart(settings["autostart"], force=installed_copy)  # bản đã cài luôn là bản tự khởi động

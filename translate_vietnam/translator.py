@@ -3,6 +3,7 @@
 Có API key Gemini: dịch bằng Gemini theo lĩnh vực người dùng chọn.
 Không có key, hoặc Gemini lỗi / hết lượt miễn phí: Google Dịch, dự phòng MyMemory.
 """
+import queue
 import re
 import threading
 import unicodedata
@@ -352,7 +353,7 @@ def _gemini_request(model: str, body: dict, api_key: str) -> dict:
         GEMINI_URL.format(model=quote_plus(model)),
         headers={"x-goog-api-key": api_key},
         json=body,
-        timeout=(5, 30),
+        timeout=(5, 60),  # thời hạn thật do _gemini_race quyết định (GEMINI_DEADLINE)
     )
     try:
         payload = r.json()
@@ -437,7 +438,7 @@ def gemini_generate(chunk: str, instruction: str, *, api_key=None, model=None) -
         "systemInstruction": {"parts": [{"text": instruction}]},
         "contents": [{"role": "user", "parts": [{"text": f"<text>\n{chunk}\n</text>"}]}],
     }
-    global resolved_model, last_engine
+    global resolved_model
     model = (model or gemini_model).strip().removeprefix("models/")
     is_auto = model.lower() == GEMINI_AUTO
     models = _model_candidates(model)
@@ -447,7 +448,6 @@ def gemini_generate(chunk: str, instruction: str, *, api_key=None, model=None) -
             _count_gemini_use()
             if is_auto:
                 resolved_model = name  # lần sau gọi thẳng model này, không thử lại tên khác
-            last_engine = f"Gemini {name}"
             break
         except GeminiError as e:
             if e.status != 404 or index == len(models) - 1:
@@ -540,6 +540,99 @@ def _gemini_translate_any(chunk: str, target: str) -> str:
                            cache_tag=("translate", target, gemini_domain))
 
 
+HEDGE_AFTER = 2.0  # giây: Gemini chưa trả lời thì gửi thêm một yêu cầu song song (cộng thêm theo độ dài)
+GEMINI_DEADLINE = 15.0  # giây: quá mức này coi như lỗi và chuyển dịch vụ khác (cộng thêm theo độ dài)
+on_event = None  # app gắn hàm ghi nhật ký: lỗi / chậm của Gemini (không có nội dung văn bản)
+_missing_models = set()  # model dự phòng Google báo không tồn tại: không gửi tới nữa
+
+
+def _note(message):
+    if on_event:
+        try:
+            on_event(message)
+        except Exception:
+            pass
+
+
+def _is_transient(error) -> bool:
+    """Lỗi tạm thời (mạng chập chờn, máy chủ bận, trả lời rỗng): thử ngay yêu cầu thứ hai.
+    Lỗi của riêng key (sai key, hết lượt) thì không, để chuyển sang key dự phòng như cũ."""
+    status = getattr(error, "status", None)
+    return status is None or status >= 500
+
+
+def _race_backup_model():
+    """Model cho yêu cầu song song: model còn lại của chế độ Tự động, hoặc chính model người dùng chọn."""
+    model = gemini_model.strip().removeprefix("models/")
+    first = _model_candidates(model)[0]
+    if model.lower() == GEMINI_AUTO:
+        for name in GEMINI_AUTO_MODELS:
+            if name != first and name not in _missing_models:
+                return name
+    return first
+
+
+def _gemini_race(chunk: str, instruction: str, key: str, label: str) -> str:
+    """Gửi yêu cầu tới Gemini; quá HEDGE_AFTER giây chưa có kết quả, hoặc gặp lỗi tạm thời, thì gửi
+    thêm một yêu cầu song song và lấy kết quả về trước. Gemini thỉnh thoảng trả lời rất chậm với
+    một yêu cầu, yêu cầu thứ hai thường về nhanh; chỉ tốn thêm lượt khi lần đầu bị chậm."""
+    global last_engine
+    started = time.monotonic()
+    hedge_after = HEDGE_AFTER + len(chunk) / 1000
+    deadline = started + min(60.0, GEMINI_DEADLINE + len(chunk) / 250)
+    results = queue.Queue()
+    backup = _race_backup_model()
+
+    def run(tag, model):
+        try:
+            results.put((tag, model, True, gemini_generate(chunk, instruction, api_key=key, model=model)))
+        except Exception as e:
+            results.put((tag, model, False, e))
+
+    def start(tag, model):
+        threading.Thread(target=run, args=(tag, model), daemon=True).start()
+
+    start("first", None)  # None: model theo cài đặt (Tự động: model tìm được lúc mở app)
+    running, hedged, errors = 1, False, []
+    while True:
+        now = time.monotonic()
+        wait = (started + hedge_after - now) if not hedged else (deadline - now)
+        try:
+            tag, model, ok, value = results.get(timeout=max(0.0, wait))
+        except queue.Empty:
+            if not hedged:
+                hedged, running = True, running + 1
+                _note(f"Gemini ({label}) chưa trả lời sau {_seconds(hedge_after)} giây, "
+                      f"gửi thêm yêu cầu song song tới {backup}")
+                start("second", backup)
+                continue
+            raise GeminiError(f"Gemini trả lời quá chậm (hơn {deadline - started:.0f} giây)")
+        running -= 1
+        elapsed = _seconds(time.monotonic() - started)
+        if ok:
+            name = model or resolved_model or gemini_model
+            last_engine = f"Gemini {name}" + (", yêu cầu song song" if tag == "second" else "")
+            if tag == "second":
+                _note(f"Gemini: yêu cầu song song ({name}) về trước, sau {elapsed} giây")
+            return value
+        _note(f"Gemini ({label}, {model or 'model chính'}) lỗi sau {elapsed} giây: {str(value)[:160]}")
+        errors.append(value)
+        backup_missing = tag == "second" and getattr(value, "status", None) == 404
+        if backup_missing:
+            _missing_models.add(model)  # model dự phòng không còn: lần sau không gửi tới nữa
+        elif not _is_transient(value):
+            raise value  # sai key / hết lượt: để gemini_complete chuyển key như cũ
+        if not hedged:
+            hedged, running = True, running + 1
+            start("second", backup)  # lỗi tạm thời: thử ngay, không chờ
+        elif running == 0:
+            raise next((e for e in errors if getattr(e, "status", None) != 404), errors[0])
+
+
+def _seconds(value: float) -> str:
+    return f"{value:.1f}".replace(".", ",")
+
+
 def gemini_complete(chunk: str, instruction: str, *, cache_tag) -> str:
     """Gọi Gemini bằng key khả dụng đầu tiên; key hết lượt thì chuyển sang key dự phòng kế tiếp.
 
@@ -556,7 +649,7 @@ def gemini_complete(chunk: str, instruction: str, *, cache_tag) -> str:
     last_error = None
     for label, key in _available_keys():
         try:
-            result = gemini_generate(chunk, instruction, api_key=key)
+            result = _gemini_race(chunk, instruction, key, label)
         except (GeminiError, requests.RequestException) as e:
             last_error = e
             if _gemini_failed(e, label, key):
