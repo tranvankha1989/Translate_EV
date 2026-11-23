@@ -8,9 +8,10 @@ import webbrowser
 from ctypes import wintypes
 from tkinter import messagebox, ttk
 
-import hotkeys
-import updater
-from config import APP_NAME, APP_VERSION, DOMAINS, GEMINI_MODELS, MAX_BACKUP_KEYS, model_from_label, model_label
+from . import hotkeys
+from . import updater
+from .config import (APP_NAME, APP_VERSION, ASSETS_DIR, AUTHOR_NAME, AUTHOR_ZALO_URL, DOMAINS, GEMINI_MODELS,
+                     MAX_BACKUP_KEYS, model_from_label, model_label)
 
 MODE_CHOICES = [("auto", "Tự động hai chiều"), ("vi", "Sang tiếng Việt"), ("en", "Sang tiếng Anh"), ("off", "Tắt")]
 MODE_BY_LABEL = {label: mode for mode, label in MODE_CHOICES}
@@ -138,6 +139,7 @@ class ControlPanel:
         self._toast = None
         self._toast_job = None
         self._update_dialog = None
+        self._about_dialog = None
         self._blink_job = None
         self._blink_on = False
         self._badge_normal()
@@ -174,8 +176,11 @@ class ControlPanel:
         entry.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=3)
         self.hotkey_entries.append(entry)
 
+        self._check(basic, "proofread_on_cut", "Nhấn Ctrl+X: sửa chính tả, câu văn (cần Gemini)").grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
         self.engine_label = ttk.Label(basic, style="Hint.TLabel", wraplength=300)
-        self.engine_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.engine_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
 
         system = ttk.Frame(outer)
@@ -191,7 +196,7 @@ class ControlPanel:
         self.expand_button = ttk.Button(buttons, text="Mở rộng >>", width=13, command=self.toggle_expanded)
         self.expand_button.grid(row=0, column=2)
         ttk.Button(buttons, text="Hướng dẫn", width=13, command=self.show_help).grid(row=1, column=0, pady=(6, 0))
-        ttk.Button(buttons, text="Thông tin", width=13, command=self.show_about).grid(
+        ttk.Button(buttons, text="Giới thiệu", width=13, command=self.show_about).grid(
             row=1, column=1, padx=6, pady=(6, 0))
         ttk.Button(buttons, text="Mặc định", width=13, command=self.reset).grid(row=1, column=2, pady=(6, 0))
 
@@ -282,10 +287,15 @@ class ControlPanel:
             row=1, column=0, sticky="w")
         ttk.Label(privacy, text="Không tự dịch khi copy từ các app (mỗi dòng một tên):").grid(
             row=2, column=0, sticky="w", pady=(4, 2))
-        self.apps_text = tk.Text(privacy, height=3, width=40, font="TkDefaultFont", relief="flat",
-                                 highlightthickness=1, highlightbackground="#a0a0a0", highlightcolor="#0b57d0")
+        self.apps_text = self._apps_box(privacy, "excluded_apps")
         self.apps_text.grid(row=3, column=0, sticky="ew")
-        self.apps_text.bind("<FocusOut>", lambda e: self._save_apps())
+        ttk.Label(privacy, text="Không sửa chính tả khi cắt từ các app:").grid(
+            row=4, column=0, sticky="w", pady=(6, 2))
+        self.proofread_apps_text = self._apps_box(privacy, "proofread_excluded_apps")
+        self.proofread_apps_text.grid(row=5, column=0, sticky="ew")
+        ttk.Label(privacy, style="Hint.TLabel", wraplength=320, text=(
+            "Mặc định bỏ qua trình soạn code, cửa sổ lệnh và Excel để không làm hỏng code, số liệu.")).grid(
+            row=6, column=0, sticky="w", pady=(2, 0))
 
         other = ttk.Frame(tabs, padding=10)
         tabs.add(other, text="Khác")
@@ -323,6 +333,13 @@ class ControlPanel:
         self.bool_vars[key] = var
         return ttk.Checkbutton(parent, text=text, variable=var,
                                command=lambda: self.c.set_option(key, var.get()))
+
+    def _apps_box(self, parent, key):
+        """Ô nhập danh sách tên app (mỗi dòng một tên), tự lưu khi rời ô."""
+        box = tk.Text(parent, height=3, width=40, font="TkDefaultFont", relief="flat",
+                      highlightthickness=1, highlightbackground="#a0a0a0", highlightcolor="#0b57d0")
+        box.bind("<FocusOut>", lambda e: self.c.set_excluded_apps(re.split(r"[\n,;]+", box.get("1.0", "end")), key))
+        return box
 
     # ---------- hiển thị ----------
     def show(self):
@@ -376,7 +393,8 @@ class ControlPanel:
     def hide(self):
         self._hide_toast()
         self._hide_badge_tip()
-        self._save_apps()
+        for box, key in ((self.apps_text, "excluded_apps"), (self.proofread_apps_text, "proofread_excluded_apps")):
+            self.c.set_excluded_apps(re.split(r"[\n,;]+", box.get("1.0", "end")), key)
         self._save_email()
         self._save_gemini()
         self.root.withdraw()
@@ -416,20 +434,21 @@ class ControlPanel:
             var.set(backups[i] if i < len(backups) else "")
         self.model_var.set(model_label(self.c.get("gemini_model")))
         self.email_var.set(self.c.get("mymemory_email"))
-        for key, var in self.bool_vars.items():
-            var.set(self.c.get(key))
+        self.refresh_checks()
         for entry in self.hotkey_entries:
             if self.root.focus_get() is not entry:
                 entry.refresh()
-        self.apps_text.delete("1.0", "end")
-        self.apps_text.insert("1.0", "\n".join(self.c.get("excluded_apps")))
+        for box, key in ((self.apps_text, "excluded_apps"), (self.proofread_apps_text, "proofread_excluded_apps")):
+            box.delete("1.0", "end")
+            box.insert("1.0", "\n".join(self.c.get(key)))
         self.refresh_engine()
 
-    # ---------- lưu cài đặt ----------
-    def _save_apps(self):
-        names = re.split(r"[\n,;]+", self.apps_text.get("1.0", "end"))
-        self.c.set_excluded_apps(names)
+    def refresh_checks(self):
+        """Cập nhật các ô tích (ví dụ khi bật / tắt sửa chính tả từ menu khay)."""
+        for key, var in self.bool_vars.items():
+            var.set(self.c.get(key))
 
+    # ---------- lưu cài đặt ----------
     def _save_email(self):
         email = self.email_var.get().strip()
         if email and not _EMAIL.fullmatch(email):
@@ -770,6 +789,13 @@ class ControlPanel:
             "không dịch. (Nếu chọn \"Dịch khi: Mỗi lần copy\" thì chỉ cần nhấn một lần.)\n"
             "2. Chờ icon ở khay hệ thống tô xanh đủ 100%: clipboard lúc này là bản dịch.\n"
             "3. Nhấn Ctrl+V để dán bản dịch.\n\n"
+            "Sửa chính tả, câu văn (cần API key Gemini):\n"
+            "1. Bôi đen đoạn văn và nhấn Ctrl+X.\n"
+            "2. Chờ icon ở khay hệ thống hiện chữ S màu cam và tô xanh đủ 100%.\n"
+            "3. Nhấn Ctrl+V: dán bản đã sửa đúng chính tả, đúng dấu, câu văn tự nhiên, giữ nguyên ý "
+            "và giọng văn của bạn.\n"
+            "Nếu chưa sửa xong hoặc không sửa được, Ctrl+V dán lại đúng đoạn đã cắt, không mất chữ. "
+            "Bật / tắt ở phần Điều khiển hoặc menu chuột phải của icon.\n\n"
             "Chế độ dịch:\n"
             "• Tự động hai chiều (A): tiếng Việt → tiếng Anh, ngôn ngữ khác → tiếng Việt.\n"
             "• Sang tiếng Việt (V) / Sang tiếng Anh (E): luôn dịch theo một chiều.\n"
@@ -788,15 +814,110 @@ class ControlPanel:
             "dịch; muốn copy–dán bình thường, hãy tắt dịch trước."), parent=self.root)
 
     def show_about(self):
-        messagebox.showinfo(f"Thông tin – {APP_NAME}", (
-            f"{APP_NAME} {APP_VERSION}\n"
-            "Dịch nhanh nội dung clipboard giữa tiếng Việt và các ngôn ngữ khác.\n\n"
-            "Quyền riêng tư: khi đang bật dịch, văn bản bạn copy được gửi tới dịch vụ dịch "
-            "(Gemini nếu bạn nhập API key, Google Dịch, hoặc MyMemory khi Google bận). "
-            "App không lưu nội dung bạn copy. Nội dung từ trình quản lý mật khẩu và chuỗi giống "
-            "mật khẩu được bỏ qua theo cài đặt Bảo vệ dữ liệu.\n\n"
-            f"Cài đặt: {self.c.config_path}\n"
-            f"Nhật ký lỗi: {self.c.log_path()}"), parent=self.root)
+        """Cửa sổ Giới thiệu: về app, tác giả và liên hệ qua Zalo (bấm mở hoặc quét mã QR)."""
+        if self._about_dialog is not None and self._about_dialog.winfo_exists():
+            self._about_dialog.lift()
+            return
+        self.show()
+        win = tk.Toplevel(self.root)
+        self._about_dialog = win
+        win.title(f"Giới thiệu – {APP_NAME}")
+        win.resizable(False, False)
+        win.transient(self.root)
+        frame = ttk.Frame(win, padding=16)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+
+        def heading(row, text):
+            ttk.Label(frame, text=text, font=("Segoe UI", 10, "bold")).grid(
+                row=row, column=0, sticky="w", pady=(12, 2))
+
+        ttk.Label(frame, text=APP_NAME, font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(frame, text=f"Phiên bản {APP_VERSION}", style="Hint.TLabel").grid(row=1, column=0, sticky="w")
+
+        heading(2, "Giới thiệu")
+        ttk.Label(frame, wraplength=430, justify="left", text=ABOUT_TEXT).grid(row=3, column=0, sticky="w")
+
+        heading(4, "Tác giả")
+        author = ttk.Frame(frame)
+        author.grid(row=5, column=0, sticky="ew")
+        author.columnconfigure(0, weight=1)
+        info = ttk.Frame(author)
+        info.grid(row=0, column=0, sticky="nw")
+        ttk.Label(info, text=AUTHOR_NAME, font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(info, text=AUTHOR_ROLE, style="Hint.TLabel", wraplength=230).grid(row=1, column=0, sticky="w")
+        ttk.Label(info, wraplength=230, justify="left", text=(
+            "Góp ý, báo lỗi hoặc cần hỗ trợ cài đặt, vui lòng nhắn tin qua Zalo: bấm nút bên dưới "
+            "hoặc quét mã QR bằng ứng dụng Zalo trên điện thoại.")).grid(row=2, column=0, sticky="w", pady=(8, 8))
+        ttk.Button(info, text="Nhắn tin qua Zalo", width=20,
+                   command=lambda: webbrowser.open(AUTHOR_ZALO_URL)).grid(row=3, column=0, sticky="w")
+
+        def copy_link():
+            win.clipboard_clear()
+            win.clipboard_append(AUTHOR_ZALO_URL)
+            self.toast("Đã sao chép liên kết Zalo.")
+
+        ttk.Button(info, text="Sao chép liên kết", width=20, command=copy_link).grid(
+            row=4, column=0, sticky="w", pady=(6, 0))
+        qr = _load_image(os.path.join(ASSETS_DIR, "zalo_qr.png"), 190, win)
+        if qr is not None:
+            win.qr_image = qr  # giữ tham chiếu, nếu không Tk sẽ xóa ảnh
+            box = ttk.Frame(author)
+            box.grid(row=0, column=1, sticky="ne", padx=(16, 0))
+            tk.Label(box, image=qr, bd=1, relief="solid", bg="white").grid(row=0, column=0)
+            ttk.Label(box, text="Quét bằng Zalo để nhắn tin", style="Hint.TLabel").grid(
+                row=1, column=0, pady=(4, 0))
+
+        heading(6, "Quyền riêng tư")
+        ttk.Label(frame, wraplength=430, justify="left", text=(
+            "Văn bản chỉ được gửi đi (tới Gemini, Google Dịch hoặc MyMemory) khi bạn dịch hay sửa chính tả. "
+            "App không lưu nội dung bạn copy hoặc cắt. Nội dung từ trình quản lý mật khẩu và chuỗi giống "
+            "mật khẩu được bỏ qua theo cài đặt Bảo vệ dữ liệu.")).grid(row=7, column=0, sticky="w")
+        ttk.Label(frame, style="Hint.TLabel", wraplength=430, justify="left", text=(
+            f"Cài đặt: {self.c.config_path}\nNhật ký lỗi: {self.c.log_path()}")).grid(
+            row=8, column=0, sticky="w", pady=(8, 0))
+
+        bottom = ttk.Frame(frame)
+        bottom.grid(row=9, column=0, sticky="ew", pady=(14, 0))
+        bottom.columnconfigure(0, weight=1)
+        ttk.Label(bottom, text=f"© 2026 {AUTHOR_NAME}. Bảo lưu mọi quyền.", style="Hint.TLabel").grid(
+            row=0, column=0, sticky="w")
+
+        def close():
+            win.destroy()
+            self._about_dialog = None
+
+        close_button = ttk.Button(bottom, text="Đóng", width=12, command=close)
+        close_button.grid(row=0, column=1, sticky="e")
+        win.bind("<Escape>", lambda e: close())
+        win.protocol("WM_DELETE_WINDOW", close)
+        win.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - win.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + 20
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        close_button.focus_set()
+
+
+ABOUT_TEXT = (
+    f"{APP_NAME} là công cụ nhỏ chạy nền trên Windows, giúp đọc và soạn văn bản Việt – Anh nhanh hơn "
+    "ngay trong lúc làm việc. Nhấn nhanh Ctrl+C hai lần để dịch, hoặc nhấn Ctrl+X để sửa chính tả và "
+    "câu văn, rồi Ctrl+V để dán kết quả, không cần mở trình duyệt hay chuyển cửa sổ. Bản dịch dùng đúng "
+    "thuật ngữ theo lĩnh vực bạn chọn, mặc định là kỹ thuật máy in công nghiệp."
+)
+AUTHOR_ROLE = "Kỹ thuật viên sửa chữa máy in công nghiệp"
+
+
+def _load_image(path, size, master):
+    """Ảnh PNG thu nhỏ vừa khung size x size cho Tk; None nếu không đọc được."""
+    try:
+        from PIL import Image, ImageTk
+
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+            img.thumbnail((size, size), Image.LANCZOS)
+            return ImageTk.PhotoImage(img, master=master)
+    except (OSError, ImportError, ValueError):
+        return None
 
 
 def ask_install_options(default_folder, normalize, needs_admin, window_icon=None):

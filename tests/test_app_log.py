@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import app
+from translate_vietnam import app
 
 
 class LogRotationTests(unittest.TestCase):

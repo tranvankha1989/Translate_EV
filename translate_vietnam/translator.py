@@ -198,7 +198,20 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 GEMINI_AUTO = "auto"
 GEMINI_AUTO_MODELS = ("gemini-flash-lite-latest", "gemini-3.5-flash-lite")
 DEFAULT_GEMINI_MODEL = GEMINI_AUTO
-DEFAULT_DOMAIN = "Kỹ thuật"
+DEFAULT_DOMAIN = "Kỹ thuật máy in công nghiệp"
+# Mô tả thêm cho Gemini về những lĩnh vực hẹp, để chọn đúng thuật ngữ của nghề.
+DOMAIN_CONTEXT = {
+    "Kỹ thuật máy in công nghiệp": (
+        "installing, operating, maintaining and repairing industrial printers: inkjet coding and "
+        "marking printers (CIJ, TIJ, piezo/DOD, large character), thermal transfer overprinters (TTO), "
+        "laser markers, label and barcode printers, UV and wide-format printers, and printers "
+        "integrated into production and packaging lines. Typical texts are service manuals, error "
+        "and alarm messages, parts lists, settings menus and maintenance procedures (printhead, "
+        "nozzle, ink and solvent system, pumps, valves, filters, sensors, encoders, mainboard, "
+        "firmware). Use the terms Vietnamese printer service technicians actually use, and keep "
+        "part numbers, error codes and on-screen menu labels unchanged"
+    ),
+}
 _LANGUAGE_NAME = {"vi": "Vietnamese", "en": "English"}
 _GEMINI_BACKOFF = (60, 120, 300, 900, 1800, 3600)
 _GEMINI_MAX_CHUNK = 12000  # mỗi lần gọi tốn 1 lượt: gửi đoạn dài một lần thay vì chia nhỏ
@@ -287,10 +300,16 @@ def clear_gemini_cache():
         _gemini_cache.clear()
 
 
+def domain_note(domain: str) -> str:
+    """Câu mô tả lĩnh vực đưa vào chỉ dẫn cho Gemini."""
+    context = DOMAIN_CONTEXT.get(domain)
+    return f"{domain} ({context})" if context else domain
+
+
 def _gemini_instruction(target: str, domain: str) -> str:
     language = _LANGUAGE_NAME[target]
     return (
-        f"You are a professional translator specializing in this field: {domain}.\n"
+        f"You are a professional translator specializing in this field: {domain_note(domain)}.\n"
         f"Translate the text inside <text></text> into {language}.\n"
         "Rules:\n"
         "- Use the standard, precise terminology of that field.\n"
@@ -334,9 +353,14 @@ def _gemini_request(model: str, body: dict, api_key: str) -> dict:
 
 
 def gemini_translate(chunk: str, target: str, *, api_key=None, model=None, domain=None) -> str:
-    """Gọi Gemini dịch một đoạn. API key gửi qua header, không nằm trong URL hay log."""
+    """Gọi Gemini dịch một đoạn."""
+    return gemini_generate(chunk, _gemini_instruction(target, domain or gemini_domain), api_key=api_key, model=model)
+
+
+def gemini_generate(chunk: str, instruction: str, *, api_key=None, model=None) -> str:
+    """Gọi Gemini một lần cho đoạn văn bản theo chỉ dẫn. API key gửi qua header, không nằm trong URL hay log."""
     body = {
-        "systemInstruction": {"parts": [{"text": _gemini_instruction(target, domain or gemini_domain)}]},
+        "systemInstruction": {"parts": [{"text": instruction}]},
         "contents": [{"role": "user", "parts": [{"text": f"<text>\n{chunk}\n</text>"}]}],
     }
     model = (model or gemini_model).strip().removeprefix("models/")
@@ -355,7 +379,7 @@ def gemini_translate(chunk: str, target: str, *, api_key=None, model=None, domai
     result = re.sub(r"^<text>\s*|\s*</text>$", "", result).strip()
     if not result:
         reason = candidates[0].get("finishReason") or "không có nội dung"
-        raise GeminiError(f"Gemini không trả về bản dịch ({reason})")
+        raise GeminiError(f"Gemini không trả về nội dung ({reason})")
     # Giữ khoảng trắng / xuống dòng ở đầu và cuối như văn bản gốc.
     leading = chunk[: len(chunk) - len(chunk.lstrip())]
     trailing = chunk[len(chunk.rstrip()):]
@@ -433,9 +457,18 @@ def _gemini_failed(error, label, key) -> bool:
 
 
 def _gemini_translate_any(chunk: str, target: str) -> str:
-    """Dịch bằng key khả dụng đầu tiên; key hết lượt thì chuyển sang key dự phòng kế tiếp."""
+    return gemini_complete(chunk, _gemini_instruction(target, gemini_domain),
+                           cache_tag=("translate", target, gemini_domain))
+
+
+def gemini_complete(chunk: str, instruction: str, *, cache_tag) -> str:
+    """Gọi Gemini bằng key khả dụng đầu tiên; key hết lượt thì chuyển sang key dự phòng kế tiếp.
+
+    Kết quả gần đây được nhớ trong bộ nhớ (không ghi đĩa) theo cache_tag, nên làm lại
+    cùng một đoạn không tốn thêm lượt.
+    """
     global active_key_label, _gemini_fail_level
-    cache_key = (chunk, target, gemini_model, gemini_domain)
+    cache_key = (chunk, cache_tag, gemini_model)
     with _retry_lock:
         if cache_key in _gemini_cache:
             _gemini_cache.move_to_end(cache_key)
@@ -443,7 +476,7 @@ def _gemini_translate_any(chunk: str, target: str) -> str:
     last_error = None
     for label, key in _available_keys():
         try:
-            result = gemini_translate(chunk, target, api_key=key)
+            result = gemini_generate(chunk, instruction, api_key=key)
         except (GeminiError, requests.RequestException) as e:
             last_error = e
             if _gemini_failed(e, label, key):

@@ -5,10 +5,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-import config
-import filters
-import hotkeys
-import translator
+from translate_vietnam import config
+from translate_vietnam import filters
+from translate_vietnam import hotkeys
+from translate_vietnam import translator
 
 
 class SettingsTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class SettingsTests(unittest.TestCase):
         settings = config.Settings(self.path)
         self.assertTrue(settings.first_run)
         self.assertEqual(settings["mode"], "auto")
-        self.assertEqual(settings["domain"], "Kỹ thuật")
+        self.assertEqual(settings["domain"], "Kỹ thuật máy in công nghiệp")
         self.assertTrue(settings.update(mode="vi", domain="Y tế – Dược", excluded_apps=["code.exe"]))
         again = config.Settings(self.path)
         self.assertFalse(again.first_run)
@@ -44,7 +44,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings["mode"], "auto")
         self.assertEqual(settings["last_on_mode"], "auto")
         self.assertIs(settings["autostart"], True)
-        self.assertEqual(settings["domain"], "Kỹ thuật")
+        self.assertEqual(settings["domain"], "Kỹ thuật máy in công nghiệp")
         self.assertEqual(settings["gemini_api_key"], "")
 
     def test_corrupt_file_does_not_crash(self):
@@ -315,7 +315,7 @@ class BackupKeyTests(unittest.TestCase):
 
 class SavingQuotaTests(unittest.TestCase):
     def test_double_copy_detection(self):
-        import app
+        from translate_vietnam import app
         self.assertEqual(app.classify_copy("single", "x", 10.0, None, 0.0), "debounce")
         self.assertEqual(app.classify_copy("double", "x", 10.0, None, 0.0), "record")  # lần đầu
         self.assertEqual(app.classify_copy("double", "x", 10.3, "x", 10.0), "translate")  # lần hai

@@ -12,8 +12,8 @@ import uuid
 import winreg
 from ctypes import wintypes
 
-import updater
-from config import APP_NAME, APP_VERSION, UPDATE_REPO
+from . import updater
+from .config import APP_NAME, APP_VERSION, UPDATE_REPO
 
 EXE_NAME = "TranslateVietnam.exe"
 FOLDER_NAME = "Translate Vietnam"

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import updater
+from translate_vietnam import updater
 
 
 class FakeResponse:

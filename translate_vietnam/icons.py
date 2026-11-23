@@ -1,10 +1,11 @@
-"""Icon khay hệ thống (A / V / E / -) và icon của app."""
+"""Icon khay hệ thống (A / V / E / - và S khi đang sửa chính tả) và icon của app."""
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
-MODE_COLOR = {"off": (120, 120, 120), "auto": (110, 68, 166), "vi": (200, 40, 40), "en": (40, 90, 200)}
-MODE_LETTER = {"off": "-", "auto": "A", "vi": "V", "en": "E"}
+MODE_COLOR = {"off": (120, 120, 120), "auto": (110, 68, 166), "vi": (200, 40, 40), "en": (40, 90, 200),
+              "fix": (214, 110, 0)}
+MODE_LETTER = {"off": "-", "auto": "A", "vi": "V", "en": "E", "fix": "S"}
 PROGRESS_COLOR = (18, 125, 69)
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import requests
 
-from config import APP_VERSION, UPDATE_REPO
+from .config import APP_VERSION, UPDATE_REPO
 
 ASSET_NAME = "TranslateVietnam.exe"
 CHECKSUM_NAME = ASSET_NAME + ".sha256"

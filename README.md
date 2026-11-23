@@ -1,14 +1,20 @@
 # Translate Vietnam
 
-Ứng dụng Windows dịch văn bản trong clipboard, chạy nền ở khay hệ thống. Bôi đen văn bản và nhấn nhanh `Ctrl+C` hai lần: ứng dụng tự nhận diện ngôn ngữ và thay nội dung clipboard bằng bản dịch, bạn chỉ việc `Ctrl+V`. Copy một lần vẫn là copy bình thường.
+Ứng dụng Windows dịch và sửa văn bản ngay trong clipboard, chạy nền ở khay hệ thống.
+
+- Bôi đen văn bản, nhấn nhanh `Ctrl+C` hai lần: clipboard thành bản dịch Việt – Anh, chỉ việc `Ctrl+V`.
+- Bôi đen đoạn văn, nhấn `Ctrl+X`: clipboard thành bản đã sửa chính tả và câu văn, `Ctrl+V` để dán lại.
+
+Copy một lần vẫn là copy bình thường.
 
 ## Tính năng
 
 - Chạy nền ở khay hệ thống, có Bảng điều khiển gọn (nút **Mở rộng** để hiện thêm tùy chọn).
 - **Dịch khi nhấn `Ctrl+C` hai lần** (mặc định), hoặc dịch mọi lần copy (đổi ở ô *Dịch khi*).
+- **Sửa chính tả, câu văn khi nhấn `Ctrl+X`** (cần API key Gemini): sửa lỗi chính tả, dấu tiếng Việt (kể cả gõ không dấu), ngữ pháp, dấu câu; viết lại câu vụng cho tự nhiên, không bay bổng; giữ nguyên ngôn ngữ, ý và giọng văn.
 - Chế độ **Tự động hai chiều**: tiếng Việt → tiếng Anh, tiếng Anh và ngôn ngữ khác → tiếng Việt.
 - Chế độ cố định **Sang tiếng Việt** / **Sang tiếng Anh**, và **Tắt** để copy bình thường.
-- **Dịch theo lĩnh vực bằng AI Gemini** (tùy chọn): nhập API key Gemini và chọn lĩnh vực (mặc định *Kỹ thuật*) để bản dịch dùng đúng thuật ngữ chuyên ngành. Không có key thì dùng Google Dịch.
+- **Dịch theo lĩnh vực bằng AI Gemini** (tùy chọn): nhập API key Gemini và chọn lĩnh vực (mặc định *Kỹ thuật máy in công nghiệp*) để bản dịch dùng đúng thuật ngữ chuyên ngành. Không có key thì dùng Google Dịch.
 - Tự chuyển dịch vụ: Gemini hết lượt miễn phí hoặc lỗi → Google Dịch → MyMemory.
 - **Bảo vệ dữ liệu**: không gửi đi dịch nội dung từ trình quản lý mật khẩu, chuỗi giống mật khẩu / mã token / URL / đường dẫn / email, và nội dung copy từ các app trong danh sách loại trừ.
 - Icon khay hiện chế độ (`A` / `V` / `E` / `–`) và tiến độ dịch tô màu từ trên xuống; hiện 100% khi bản dịch đã vào clipboard.
@@ -30,6 +36,18 @@
 **Gỡ cài đặt:** Cài đặt Windows → Ứng dụng → *Translate Vietnam* → Gỡ cài đặt. Ứng dụng hỏi có xóa luôn cài đặt (API key…) hay giữ lại cho lần cài sau.
 
 Cài không hỏi (cho quản trị viên): `TranslateVietnam.exe --install-to "D:\Apps" --no-desktop`.
+
+## Sửa chính tả, câu văn bằng Ctrl+X
+
+1. Bôi đen đoạn văn cần sửa và nhấn `Ctrl+X`.
+2. Chờ icon ở khay hệ thống hiện chữ **S** màu cam và tô xanh đủ 100%.
+3. Nhấn `Ctrl+V` để dán bản đã sửa vào đúng chỗ cũ.
+
+- Cần API key Gemini (xem mục *Dịch theo lĩnh vực bằng Gemini*). Mỗi lần sửa tốn 1 lượt; cắt lại đúng đoạn đó trong lúc app đang chạy thì không tốn thêm.
+- Nếu chưa sửa xong hoặc không sửa được (mất mạng, hết lượt, kết quả khác bản gốc quá nhiều), `Ctrl+V` dán lại đúng đoạn bạn đã cắt, không mất chữ.
+- Không sửa đoạn chỉ có một từ, nội dung riêng tư (mật khẩu, token...) và nội dung cắt từ trình soạn code, cửa sổ lệnh, Excel. Danh sách app bỏ qua đổi được ở Mở rộng → **Bảo vệ dữ liệu**.
+- Bật / tắt ở phần Điều khiển, hoặc chuột phải vào icon → *Sửa chính tả khi nhấn Ctrl+X*.
+- Để nhận ra `Ctrl+X`, app dùng Raw Input của Windows ở chế độ chỉ nghe: không chặn hay làm chậm bàn phím, chỉ ghi lại thời điểm nhấn `Ctrl+X` / `Ctrl+C`, không lưu phím nào khác. Tắt tính năng thì app ngừng nghe bàn phím.
 
 ## Điều khiển
 
@@ -103,26 +121,58 @@ run.bat
 Chạy test:
 
 ```bat
-py -3.11 -m unittest test_features test_translator test_app_log test_updater test_installer
+py -3.11 -m unittest discover -s tests -t .
+```
+
+## Cấu trúc thư mục
+
+```text
+Translate Vietnam/
+├── app.py                  File khởi chạy (run.bat, bản exe và mục tự khởi động đều gọi file này)
+├── run.bat                 Chạy app từ mã nguồn
+├── requirements.txt        Thư viện cần cài
+├── translate_vietnam/      Mã nguồn
+│   ├── app.py              Chạy nền: icon khay, theo dõi clipboard, chế độ dịch, cài đặt, cập nhật
+│   ├── panel.py            Bảng điều khiển, Hướng dẫn, Giới thiệu
+│   ├── translator.py       Dịch bằng Gemini theo lĩnh vực, dự phòng Google Dịch và MyMemory
+│   ├── proofreader.py      Sửa chính tả, câu văn bằng Gemini
+│   ├── keywatch.py         Nhận biết phím Ctrl+X
+│   ├── filters.py          Bỏ qua nội dung riêng tư
+│   ├── hotkeys.py          Phím tắt toàn cục
+│   ├── config.py           Cài đặt người dùng, phiên bản, thông tin tác giả
+│   ├── icons.py            Icon khay và icon app
+│   ├── installer.py        Cài vào Windows, gỡ cài đặt
+│   ├── updater.py          Tự cập nhật từ GitHub Releases
+│   └── assets/             Ảnh đi kèm (mã QR Zalo)
+├── tests/                  Kiểm thử tự động
+└── scripts/
+    ├── build_exe.bat       Build bản exe vào dist\
+    └── release.bat         Phát hành bản mới lên GitHub Releases
 ```
 
 ## Tự build EXE
 
 ```bat
-build_exe.bat
+scripts\build_exe.bat
 ```
 
-Script cài thư viện, chạy test, tạo icon rồi build `dist\TranslateVietnam.exe`. Bản build là file độc lập, máy người dùng không cần cài Python.
+Script cài thư viện, chạy test, tạo icon rồi build `dist\TranslateVietnam.exe`. File tạm khi build nằm trong `build\`. Bản build là file độc lập, máy người dùng không cần cài Python.
 
 ## Phát hành bản mới (dành cho nhà phát triển)
 
 Cần Python 3.11, git và [GitHub CLI](https://cli.github.com) đã đăng nhập (`gh auth login`) — chỉ trên máy phát hành, người dùng không cần.
 
-1. Tăng `APP_VERSION` trong `config.py` (ví dụ `1.0.0` → `1.0.1`).
-2. (Tùy chọn) Ghi nội dung thay đổi vào `release_notes.md`; nếu không có, GitHub tự tạo ghi chú từ các commit. Nên có mục `## Có gì mới` (gạch đầu dòng `- ...`): cửa sổ cập nhật trong app hiển thị đúng mục này cho người dùng.
-3. Commit thay đổi, rồi chạy `release.bat`.
+1. Tăng `APP_VERSION` trong `translate_vietnam\config.py` (ví dụ `1.1.0` → `1.1.1`).
+2. (Tùy chọn) Ghi nội dung thay đổi vào `release_notes.md` ở thư mục gốc; nếu không có, GitHub tự tạo ghi chú từ các commit. Nên có mục `## Có gì mới` (gạch đầu dòng `- ...`): cửa sổ cập nhật trong app hiển thị đúng mục này cho người dùng.
+3. Commit thay đổi, rồi chạy `scripts\release.bat`.
 
 Script đẩy code lên GitHub, chạy test, build exe, tạo file `TranslateVietnam.exe.sha256` và tạo bản phát hành `v<phiên bản>` kèm hai file đó. Ứng dụng của người dùng sẽ tự báo có bản mới trong vòng một ngày.
+
+## Tác giả và liên hệ
+
+Translate Vietnam do **Trần Văn Kha** phát triển và hỗ trợ.
+
+Góp ý, báo lỗi hoặc cần hỗ trợ cài đặt: nhắn tin qua [Zalo](https://zaloapp.com/qr/p/376biavcj0xw), hoặc trong app bấm **Giới thiệu** (hay chuột phải vào icon → *Giới thiệu và liên hệ*) để bấm mở Zalo hoặc quét mã QR.
 
 ## Giấy phép
 

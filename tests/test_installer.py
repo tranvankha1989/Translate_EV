@@ -7,9 +7,9 @@ import unittest
 import winreg
 from unittest.mock import patch
 
-import config
-import installer
-import updater
+from translate_vietnam import config
+from translate_vietnam import installer
+from translate_vietnam import updater
 
 TEST_KEY = r"Software\TranslateVietnamTest\Uninstall"
 
@@ -154,7 +154,7 @@ class InstallTests(InstallerTestCase):
 class MaybeInstallTests(InstallerTestCase):
     def setUp(self):
         super().setUp()
-        import app
+        from translate_vietnam import app
         self.app = app
         self.settings = config.Settings(os.path.join(self.tmp, "config.json"))
         for obj, name, value in ((app, "settings", self.settings), (sys, "frozen", True),
@@ -225,7 +225,7 @@ class MaybeInstallTests(InstallerTestCase):
 
 class AutostartRemovalTests(unittest.TestCase):
     def test_only_removes_entry_pointing_into_folder(self):
-        import app
+        from translate_vietnam import app
         run_key = r"Software\TranslateVietnamTest\Run"
         self.addCleanup(delete_test_key)
         with patch.object(app, "RUN_KEY", run_key):

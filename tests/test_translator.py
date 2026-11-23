@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import urlencode
 
-import translator
+from translate_vietnam import translator
 
 
 class LanguageDetectionTests(unittest.TestCase):

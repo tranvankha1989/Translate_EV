@@ -11,11 +11,15 @@ import threading
 from ctypes import wintypes
 
 APP_NAME = "Translate Vietnam"
-APP_VERSION = "1.0.5"  # tăng số này trước mỗi lần chạy release.bat
+APP_VERSION = "1.1.0"  # tăng số này trước mỗi lần chạy scripts\release.bat
 UPDATE_REPO = "tranvankha1989/Translate_EV"  # repo GitHub chứa các bản phát hành
+AUTHOR_NAME = "Trần Văn Kha"
+AUTHOR_ZALO_URL = "https://zaloapp.com/qr/p/376biavcj0xw"  # nội dung mã QR Zalo trong assets\zalo_qr.png
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 MODES = ("off", "auto", "vi", "en")
 DOMAINS = [
+    "Kỹ thuật máy in công nghiệp",
     "Kỹ thuật",
     "Công nghệ thông tin",
     "Điện – Điện tử",
@@ -61,6 +65,13 @@ DEFAULTS = {
     "gemini_backup_keys": [],  # tối đa 3 key dự phòng (nên là project có bật thanh toán)
     "gemini_model": GEMINI_MODELS[0],
     "domain": DOMAINS[0],
+    "domain_default_migrated": True,  # đã chuyển lĩnh vực mặc định cũ "Kỹ thuật" sang mặc định mới (1.1.0)
+    # Nhấn Ctrl+X: sửa chính tả, câu văn của đoạn vừa cắt rồi Ctrl+V để dán (cần API key Gemini).
+    "proofread_on_cut": True,
+    # Cắt từ các app này thì không sửa (code, lệnh, số liệu bảng tính dễ bị làm hỏng).
+    "proofread_excluded_apps": ["code.exe", "cursor.exe", "devenv.exe", "pycharm64.exe", "idea64.exe",
+                                "sublime_text.exe", "notepad++.exe", "windowsterminal.exe", "cmd.exe",
+                                "powershell.exe", "pwsh.exe", "excel.exe"],
     "notify_errors": True,
     "auto_update": True,  # tự kiểm tra bản mới trên GitHub mỗi ngày
     "run_without_install": False,  # người dùng đã chọn "Chạy không cài đặt": không hỏi cài nữa
@@ -68,6 +79,7 @@ DEFAULTS = {
     "gemini_usage_count": 0,  # chỉ lưu số lượt, không lưu nội dung
 }
 TRIGGERS = ("double", "single")
+OLD_DEFAULT_DOMAIN = "Kỹ thuật"  # mặc định trước bản 1.1.0
 
 
 class _Blob(ctypes.Structure):
@@ -160,6 +172,12 @@ class Settings:
         for key in ("gemini_model", "domain"):
             if not self._data[key]:
                 self._data[key] = DEFAULTS[key]
+        if stored.get("domain_default_migrated") is not True:
+            # Từ 1.1.0 lĩnh vực mặc định là "Kỹ thuật máy in công nghiệp": người còn để mặc định cũ
+            # được chuyển một lần; ai chọn lại "Kỹ thuật" sau đó thì giữ nguyên lựa chọn.
+            if self._data["domain"] == OLD_DEFAULT_DOMAIN:
+                self._data["domain"] = DEFAULTS["domain"]
+            self._data["domain_default_migrated"] = True
         if self._data["trigger"] not in TRIGGERS:
             self._data["trigger"] = DEFAULTS["trigger"]
         if self._data["mode"] not in MODES:
