@@ -48,6 +48,9 @@ ERROR_NOTICE_INTERVAL = 600  # giây tối thiểu giữa hai lần báo "không
 DOUBLE_COPY_MIN, DOUBLE_COPY_MAX = 0.06, 0.6
 DEBOUNCE_SECONDS = 0.35  # "Mỗi lần copy": copy liên tiếp nhanh thì chỉ dịch lần cuối
 CUT_DEBOUNCE = 0.2  # app ghi clipboard hai lần cho một lần cắt: chỉ sửa một lần
+# Giữ kết nối tới Gemini: đo 24/11/2026 máy chủ giữ kết nối bỏ không 3–5 phút; 60 giây để dư
+# an toàn với router / mạng công ty đóng kết nối sớm hơn. Dùng lại kết nối ~0,06 giây, nối lại ~0,45 giây.
+KEEP_WARM_SECONDS = 60
 WM_CLIPBOARDUPDATE = 0x031D
 WM_SHOW_PANEL = 0x8002  # WM_APP + 2: bản chạy sau nhờ bản đang chạy mở Bảng điều khiển
 WM_QUIT_APP = 0x8003  # WM_APP + 3: trình gỡ cài đặt nhờ bản đang chạy thoát
@@ -253,6 +256,30 @@ def notify_needs_gemini():
            "Mở Bảng điều khiển, bấm Mở rộng, tab AI Gemini để nhập key (miễn phí).")
 
 
+def log_duration(action, text, started):
+    """Ghi thời gian mỗi lần dịch / sửa vào nhật ký (chỉ số ký tự và số giây, không ghi nội dung)."""
+    seconds = f"{time.monotonic() - started:.1f}".replace(".", ",")
+    log(f"Thời gian: {action} {len(text)} ký tự trong {seconds} giây ({translator.last_engine or 'không rõ'})")
+
+
+def prepare_gemini():
+    """Kiểm tra key, model Gemini và mở sẵn kết nối; cập nhật dòng trạng thái trong Bảng điều khiển."""
+    try:
+        translator.prepare_gemini()
+    except Exception as e:
+        log(f"Không kiểm tra được Gemini lúc khởi động: {e!r}")
+    ui_call(lambda: panel and panel.refresh_engine())
+
+
+def gemini_keeper():
+    """Mở app: kiểm tra Gemini ngay, sau đó giữ kết nối luôn mở để mỗi lần dịch không phải nối lại."""
+    prepare_gemini()
+    stop = threading.Event()
+    while not stop.wait(KEEP_WARM_SECONDS):
+        if translator.gemini_keys():
+            translator.keep_warm()
+
+
 def start_progress(job, label, *, target=None, face=None):
     """Tô tiến độ lên icon khay trong lúc chờ dịch vụ. Trả về (luồng vẽ, hàm báo tiến độ 0–1)."""
     state = {"done": 0}
@@ -335,6 +362,7 @@ def replace_clipboard(result, sequence, job):
 
 def do_translate(target, sequence, manual, job):
     animation = None
+    started = time.monotonic()
 
     def is_cancelled():
         return job.is_set() or clipboard_sequence() != sequence
@@ -372,6 +400,7 @@ def do_translate(target, sequence, manual, job):
         job.set()
         animation.join()
         refresh_icon(target, 100, "Đã dịch xong (100%)", clear_after=0.8, job=job)
+        log_duration("dịch", text, started)
         return 0
     except TranslationCancelled:
         return 0
@@ -402,6 +431,7 @@ def do_proofread(sequence, job):
     giữ nguyên đúng đoạn đã cắt, nên Ctrl+V vẫn dán lại được, không mất chữ.
     """
     animation = None
+    started = time.monotonic()
 
     def is_cancelled():
         return job.is_set() or clipboard_sequence() != sequence
@@ -448,6 +478,7 @@ def do_proofread(sequence, job):
         done = ("Đã sửa xong (100%), nhấn Ctrl+V để dán" if result != text
                 else "Đoạn văn đã ổn, không cần sửa")
         refresh_icon(None, 100, done, clear_after=1.2, job=job, face=FIX_FACE)
+        log_duration("sửa chính tả", text, started)
         return 0
     except TranslationCancelled:
         return 0
@@ -873,6 +904,8 @@ class Controller:
     def set_gemini(self, **changes):
         settings.update(**changes)
         apply_translator_settings()
+        if {"gemini_api_key", "gemini_backup_keys", "gemini_model"} & set(changes):
+            threading.Thread(target=prepare_gemini, daemon=True).start()  # kiểm tra key / model mới ngay
 
     def set_excluded_apps(self, names, key="excluded_apps"):
         """key: "excluded_apps" (không dịch) hoặc "proofread_excluded_apps" (không sửa chính tả)."""
@@ -1169,6 +1202,7 @@ def on_ready(icon_, hotkey_errors, updated_to=None, installed=False):
     icon_.visible = True
     threading.Thread(target=message_listener, daemon=True).start()
     threading.Thread(target=watcher, daemon=True).start()
+    threading.Thread(target=gemini_keeper, daemon=True).start()
     threading.Thread(target=update_checker, daemon=True).start()
     if updated_to:
         notify(f"Đã cập nhật {APP_NAME} lên phiên bản {updated_to}.")

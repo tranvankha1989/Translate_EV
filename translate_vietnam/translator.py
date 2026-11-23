@@ -108,7 +108,8 @@ def _mymemory_chunks(text: str, source: str, target: str):
 _URL = "https://translate.googleapis.com/translate_a/single"
 _MYMEMORY_URL = "https://api.mymemory.translated.net/get"
 _HEADERS = {"User-Agent": "TranslateVietnam/1.0"}
-_worker = threading.local()
+_session_lock = threading.Lock()
+_shared_session = None
 _retry_lock = threading.Lock()
 _google_retry_at = 0.0
 _google_fail_level = 0
@@ -121,10 +122,17 @@ class TranslationCancelled(Exception):
 
 
 def _session():
-    if not hasattr(_worker, "session"):
-        _worker.session = requests.Session()
-        _worker.session.headers.update(_HEADERS)
-    return _worker.session
+    """Một phiên HTTP dùng chung cho mọi luồng dịch: kết nối mở sẵn lúc khởi động (và được
+    giữ ấm) dùng lại được cho mọi lần dịch, không phải nối lại máy chủ mỗi lần."""
+    global _shared_session
+    with _session_lock:
+        if _shared_session is None:
+            session = requests.Session()
+            session.headers.update(_HEADERS)
+            adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=8)
+            session.mount("https://", adapter)
+            _shared_session = session
+        return _shared_session
 
 
 def _google_backoff():
@@ -193,6 +201,8 @@ def _mymemory_cached(chunk: str, target: str, source: str | None) -> str:
 # --- Gemini (tùy chọn): dịch theo lĩnh vực khi người dùng nhập API key ---------------
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_MODEL_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}"  # chỉ đọc thông tin model
+GEMINI_LIST_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 # "auto": tên rút gọn Google luôn trỏ tới bản Flash-Lite mới nhất (báo trước 2 tuần khi đổi),
 # nên app phát hành rồi vẫn chạy khi model cũ bị tắt. Nếu tên này không còn thì dùng bản cố định.
 GEMINI_AUTO = "auto"
@@ -228,6 +238,8 @@ _gemini_cache = OrderedDict()  # bản dịch Gemini gần đây, chỉ trong b�
 _GEMINI_CACHE_SIZE = 512
 last_gemini_error = None  # lý do lỗi gần nhất, để hiện trong Bảng điều khiển
 active_key_label = None  # key vừa dịch thành công: "key chính" / "key dự phòng 1"...
+resolved_model = None  # model thật của chế độ Tự động, tìm lúc mở app: lần dịch gọi thẳng model này
+last_engine = None  # dịch vụ vừa trả kết quả (ghi vào nhật ký thời gian dịch)
 
 
 class GeminiError(RuntimeError):
@@ -267,6 +279,7 @@ def configure(**options):
         with _retry_lock:
             _gemini_retry_at, _gemini_fail_level, last_gemini_error, active_key_label = 0.0, 0, None, None
             _key_state.clear()
+            globals()["resolved_model"] = None
 
 
 def gemini_keys() -> list[tuple[str, str]]:
@@ -352,6 +365,67 @@ def _gemini_request(model: str, body: dict, api_key: str) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _model_candidates(model: str) -> tuple:
+    """Các model sẽ thử theo thứ tự. Chế độ Tự động: model đã tìm được lúc mở app đứng đầu."""
+    if model.lower() != GEMINI_AUTO:
+        return (model,)
+    found = resolved_model
+    if found in GEMINI_AUTO_MODELS:
+        return (found,) + tuple(name for name in GEMINI_AUTO_MODELS if name != found)
+    return GEMINI_AUTO_MODELS
+
+
+def _error_message(response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return (error or {}).get("message") or f"HTTP {response.status_code}"
+
+
+def prepare_gemini():
+    """Lúc mở app (hoặc đổi key / model): kiểm tra key, tìm model chạy được và mở sẵn kết nối.
+
+    Chỉ đọc thông tin model nên không tốn lượt dịch Gemini và không gửi nội dung nào.
+    Trả về tên model dùng được, hoặc None (chưa có key, key sai, mất mạng...).
+    """
+    global resolved_model
+    keys = _available_keys()
+    if not keys:
+        return None
+    label, key = keys[0]
+    model = gemini_model.strip().removeprefix("models/")
+    for name in (GEMINI_AUTO_MODELS if model.lower() == GEMINI_AUTO else (model,)):
+        try:
+            r = _session().get(GEMINI_MODEL_URL.format(model=quote_plus(name)),
+                               headers={"x-goog-api-key": key}, timeout=(5, 10))
+        except requests.RequestException:
+            return None  # mất mạng: lần dịch đầu tiên sẽ tự kết nối
+        if r.status_code == 200:
+            if model.lower() == GEMINI_AUTO:
+                resolved_model = name
+            return name
+        if r.status_code == 404:
+            continue  # tên model không còn: thử tên kế tiếp
+        message = _error_message(r)
+        if r.status_code in (401, 403) or (r.status_code == 400 and "key" in message.lower()):
+            _gemini_failed(GeminiError(message, status=r.status_code), label, key)  # báo key sai ngay
+        return None
+    return None
+
+
+def keep_warm():
+    """Giữ kết nối tới máy chủ Gemini luôn mở để lần dịch không phải nối lại.
+
+    Gửi yêu cầu rỗng không kèm API key: không tốn lượt, không gửi nội dung (máy chủ trả 403, kết nối vẫn giữ).
+    """
+    try:
+        _session().get(GEMINI_LIST_URL, timeout=(5, 10))
+    except requests.RequestException:
+        pass
+
+
 def gemini_translate(chunk: str, target: str, *, api_key=None, model=None, domain=None) -> str:
     """Gọi Gemini dịch một đoạn."""
     return gemini_generate(chunk, _gemini_instruction(target, domain or gemini_domain), api_key=api_key, model=model)
@@ -363,12 +437,17 @@ def gemini_generate(chunk: str, instruction: str, *, api_key=None, model=None) -
         "systemInstruction": {"parts": [{"text": instruction}]},
         "contents": [{"role": "user", "parts": [{"text": f"<text>\n{chunk}\n</text>"}]}],
     }
+    global resolved_model, last_engine
     model = (model or gemini_model).strip().removeprefix("models/")
-    models = GEMINI_AUTO_MODELS if model.lower() == GEMINI_AUTO else (model,)
+    is_auto = model.lower() == GEMINI_AUTO
+    models = _model_candidates(model)
     for index, name in enumerate(models):
         try:
             payload = _gemini_request(name, body, api_key or gemini_api_key)
             _count_gemini_use()
+            if is_auto:
+                resolved_model = name  # lần sau gọi thẳng model này, không thử lại tên khác
+            last_engine = f"Gemini {name}"
             break
         except GeminiError as e:
             if e.status != 404 or index == len(models) - 1:
@@ -467,11 +546,12 @@ def gemini_complete(chunk: str, instruction: str, *, cache_tag) -> str:
     Kết quả gần đây được nhớ trong bộ nhớ (không ghi đĩa) theo cache_tag, nên làm lại
     cùng một đoạn không tốn thêm lượt.
     """
-    global active_key_label, _gemini_fail_level
+    global active_key_label, _gemini_fail_level, last_engine
     cache_key = (chunk, cache_tag, gemini_model)
     with _retry_lock:
         if cache_key in _gemini_cache:
             _gemini_cache.move_to_end(cache_key)
+            last_engine = "bộ nhớ của app (không tốn lượt)"
             return _gemini_cache[cache_key]
     last_error = None
     for label, key in _available_keys():
@@ -524,12 +604,16 @@ def _translate_chunk(chunk: str, target: str, source: str | None, is_cancelled) 
 
 def _translate_free(chunk: str, target: str, source: str | None, is_cancelled) -> str:
     """Google Dịch, dự phòng MyMemory."""
+    global last_engine
     try:
-        return _google_cached(chunk, target)[0]
+        result = _google_cached(chunk, target)[0]
+        last_engine = "Google Dịch"
+        return result
     except _SERVICE_ERRORS:
         if is_cancelled and is_cancelled():
             raise TranslationCancelled
         source = source or ("vi" if target == "en" else "en")
+        last_engine = "MyMemory"
         return "".join(
             _mymemory_cached(part, target, source)
             for part in _mymemory_chunks(chunk, source, target)

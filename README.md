@@ -16,6 +16,7 @@ Copy một lần vẫn là copy bình thường.
 - Chế độ cố định **Sang tiếng Việt** / **Sang tiếng Anh**, và **Tắt** để copy bình thường.
 - **Dịch theo lĩnh vực bằng AI Gemini** (tùy chọn): nhập API key Gemini và chọn lĩnh vực (mặc định *Kỹ thuật máy in công nghiệp*) để bản dịch dùng đúng thuật ngữ chuyên ngành. Không có key thì dùng Google Dịch.
 - Tự chuyển dịch vụ: Gemini hết lượt miễn phí hoặc lỗi → Google Dịch → MyMemory.
+- Dịch nhanh hơn: lúc mở app, ứng dụng kiểm tra sẵn API key và model Gemini, mở sẵn kết nối và giữ kết nối luôn mở, nên mỗi lần dịch không phải nối lại máy chủ (việc kiểm tra và giữ kết nối không tốn lượt Gemini).
 - **Bảo vệ dữ liệu**: không gửi đi dịch nội dung từ trình quản lý mật khẩu, chuỗi giống mật khẩu / mã token / URL / đường dẫn / email, và nội dung copy từ các app trong danh sách loại trừ.
 - Icon khay hiện chế độ (`A` / `V` / `E` / `–`) và tiến độ dịch tô màu từ trên xuống; hiện 100% khi bản dịch đã vào clipboard.
 - Phím tắt toàn cục, đổi được trong Bảng điều khiển.
@@ -105,7 +106,7 @@ Lưu ý từ bản 1.0.0: mặc định cần **nhấn nhanh `Ctrl+C` hai lần*
 ## Cài đặt và nhật ký lỗi
 
 - Cài đặt: `%APPDATA%\TranslateVietnam\config.json`.
-- Nhật ký lỗi: `app.log` cạnh `TranslateVietnam.exe` (hoặc cạnh `app.py` khi chạy từ mã nguồn). Nếu thư mục đó không ghi được, log nằm tại `%LOCALAPPDATA%\TranslateVietnam\app.log`. File log tối đa 5 MB; khi đầy, ứng dụng tự xóa phần cũ nhất và giữ lại khoảng 2,5 MB log mới nhất.
+- Nhật ký: `app.log` cạnh `TranslateVietnam.exe` (hoặc cạnh `app.py` khi chạy từ mã nguồn). Ngoài lỗi, mỗi lần dịch / sửa chính tả có một dòng `Thời gian:` ghi số ký tự, số giây và dịch vụ đã dùng (không ghi nội dung). Nếu thư mục đó không ghi được, log nằm tại `%LOCALAPPDATA%\TranslateVietnam\app.log`. File log tối đa 5 MB; khi đầy, ứng dụng tự xóa phần cũ nhất và giữ lại khoảng 2,5 MB log mới nhất.
 
 Nếu không thấy icon, kiểm tra khu vực icon ẩn của Windows. Nếu dịch không hoạt động, kiểm tra kết nối Internet và `app.log`.
 
