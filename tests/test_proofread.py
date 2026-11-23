@@ -6,8 +6,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from tests.test_features import FakeResponse, FakeSession, gemini_ok
-from translate_vietnam import app, config, filters, keywatch, proofreader, translator
+from tests.test_features import FakeSession, gemini_ok
+from translate_vietnam import app, busycursor, config, filters, keywatch, proofreader, translator
 
 PRINTER = "Kỹ thuật máy in công nghiệp"
 
@@ -114,6 +114,8 @@ class DoProofreadTests(unittest.TestCase):
             patch.object(app, "notify"),
             patch.object(filters, "clipboard_is_private", return_value=False),
             patch.object(filters, "clipboard_owner_app", return_value="winword.exe"),
+            patch.object(busycursor, "_apply"),  # không đổi con trỏ thật khi chạy test
+            patch.object(busycursor, "restore"),
         )
         for p in patches:
             p.start()

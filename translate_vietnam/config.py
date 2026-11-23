@@ -11,7 +11,7 @@ import threading
 from ctypes import wintypes
 
 APP_NAME = "Translate Vietnam"
-APP_VERSION = "1.1.1"  # tăng số này trước mỗi lần chạy scripts\release.bat
+APP_VERSION = "1.1.2"  # tăng số này trước mỗi lần chạy scripts\release.bat
 UPDATE_REPO = "tranvankha1989/Translate_EV"  # repo GitHub chứa các bản phát hành
 AUTHOR_NAME = "Trần Văn Kha"
 AUTHOR_ZALO_URL = "https://zaloapp.com/qr/p/376biavcj0xw"  # nội dung mã QR Zalo trong assets\zalo_qr.png
@@ -72,6 +72,8 @@ DEFAULTS = {
     "proofread_excluded_apps": ["code.exe", "cursor.exe", "devenv.exe", "pycharm64.exe", "idea64.exe",
                                 "sublime_text.exe", "notepad++.exe", "windowsterminal.exe", "cmd.exe",
                                 "powershell.exe", "pwsh.exe", "excel.exe"],
+    # Con trỏ chuột lúc đang dịch / sửa: "spin" vòng xoay, "arrow" mũi tên kèm vòng xoay, "off" không đổi.
+    "busy_cursor": "spin",
     "notify_errors": True,
     "auto_update": True,  # tự kiểm tra bản mới trên GitHub mỗi ngày
     "run_without_install": False,  # người dùng đã chọn "Chạy không cài đặt": không hỏi cài nữa
@@ -79,6 +81,7 @@ DEFAULTS = {
     "gemini_usage_count": 0,  # chỉ lưu số lượt, không lưu nội dung
 }
 TRIGGERS = ("double", "single")
+BUSY_CURSOR_STYLES = ("spin", "arrow", "off")
 OLD_DEFAULT_DOMAIN = "Kỹ thuật"  # mặc định trước bản 1.1.0
 
 
@@ -180,6 +183,8 @@ class Settings:
             self._data["domain_default_migrated"] = True
         if self._data["trigger"] not in TRIGGERS:
             self._data["trigger"] = DEFAULTS["trigger"]
+        if self._data["busy_cursor"] not in BUSY_CURSOR_STYLES:
+            self._data["busy_cursor"] = DEFAULTS["busy_cursor"]
         if self._data["mode"] not in MODES:
             self._data["mode"] = DEFAULTS["mode"]
         if self._data["last_on_mode"] not in MODES or self._data["last_on_mode"] == "off":

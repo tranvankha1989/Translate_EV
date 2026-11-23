@@ -18,6 +18,9 @@ MODE_BY_LABEL = {label: mode for mode, label in MODE_CHOICES}
 TRIGGER_CHOICES = [("double", "Nhấn Ctrl+C hai lần"), ("single", "Mỗi lần copy")]
 TRIGGER_BY_LABEL = {label: trigger for trigger, label in TRIGGER_CHOICES}
 LABEL_BY_TRIGGER = dict(TRIGGER_CHOICES)
+CURSOR_CHOICES = [("spin", "Vòng xoay"), ("arrow", "Mũi tên kèm vòng xoay"), ("off", "Không đổi")]
+CURSOR_BY_LABEL = {label: style for style, label in CURSOR_CHOICES}
+LABEL_BY_CURSOR = dict(CURSOR_CHOICES)
 LABEL_BY_MODE = dict(MODE_CHOICES)
 HOTKEY_NAMES = {"hotkey_toggle": "Bật/tắt dịch", "hotkey_vi": "Sang tiếng Việt", "hotkey_en": "Sang tiếng Anh"}
 GEMINI_KEY_URL = "https://aistudio.google.com/apikey"
@@ -311,8 +314,17 @@ class ControlPanel:
         for sequence in ("<FocusOut>", "<Return>"):
             email.bind(sequence, lambda e: self._save_email())
         self._check(other, "notify_errors", "Thông báo khi không dịch được").grid(row=3, column=0, sticky="w")
+        cursor_row = ttk.Frame(other)
+        cursor_row.grid(row=4, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(cursor_row, text="Con trỏ khi đang dịch, sửa:").grid(row=0, column=0, sticky="w")
+        self.cursor_var = tk.StringVar()
+        cursor_box = ttk.Combobox(cursor_row, textvariable=self.cursor_var, state="readonly", width=22,
+                                  values=[label for _, label in CURSOR_CHOICES])
+        cursor_box.grid(row=0, column=1, padx=(8, 0))
+        cursor_box.bind("<<ComboboxSelected>>",
+                        lambda e: self.c.set_option("busy_cursor", CURSOR_BY_LABEL[self.cursor_var.get()]))
         ttk.Button(other, text="Mở thư mục log", command=self.c.open_log_folder).grid(
-            row=4, column=0, sticky="w", pady=(4, 0))
+            row=5, column=0, sticky="w", pady=(6, 0))
         # Kiểm tra cập nhật: bấm vào dòng phiên bản trên cùng (app vẫn tự kiểm tra mỗi ngày).
         location = self.c.install_location()
         if location:
@@ -434,6 +446,7 @@ class ControlPanel:
             var.set(backups[i] if i < len(backups) else "")
         self.model_var.set(model_label(self.c.get("gemini_model")))
         self.email_var.set(self.c.get("mymemory_email"))
+        self.cursor_var.set(LABEL_BY_CURSOR.get(self.c.get("busy_cursor"), CURSOR_CHOICES[0][1]))
         self.refresh_checks()
         for entry in self.hotkey_entries:
             if self.root.focus_get() is not entry:

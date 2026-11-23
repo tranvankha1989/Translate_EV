@@ -19,10 +19,13 @@ Copy một lần vẫn là copy bình thường.
 - Dịch nhanh hơn: lúc mở app, ứng dụng kiểm tra sẵn API key và model Gemini, mở sẵn kết nối và giữ kết nối luôn mở, nên mỗi lần dịch không phải nối lại máy chủ (việc kiểm tra và giữ kết nối không tốn lượt Gemini).
 - **Bảo vệ dữ liệu**: không gửi đi dịch nội dung từ trình quản lý mật khẩu, chuỗi giống mật khẩu / mã token / URL / đường dẫn / email, và nội dung copy từ các app trong danh sách loại trừ.
 - Icon khay hiện chế độ (`A` / `V` / `E` / `–`) và tiến độ dịch tô màu từ trên xuống; hiện 100% khi bản dịch đã vào clipboard.
+- Con trỏ chuột hiện vòng xoay trong lúc đang dịch / sửa chính tả, xong thì trở lại bình thường. Đổi kiểu (vòng xoay, mũi tên kèm vòng xoay, không đổi) ở Mở rộng → **Khác**. App dùng đúng bộ và cỡ con trỏ của từng máy, luôn tự trả lại con trỏ sau tối đa 60 giây, khi thoát và khi mở lại sau lần bị tắt ngang.
 - Phím tắt toàn cục, đổi được trong Bảng điều khiển.
 - Tự chạy cùng Windows (bật/tắt trong Bảng điều khiển), không cần quyền Administrator.
 
 ## Cách dùng bản EXE
+
+Chạy trên mọi máy Windows 10 / 11 (64-bit), không cần cài Python hay công cụ nào khác. Mỗi máy nhập API key Gemini riêng: key được mã hóa theo tài khoản Windows của máy đó, chép file cài đặt sang máy khác sẽ không mang theo key.
 
 1. Tải `TranslateVietnam.exe` trong phần [Releases](https://github.com/tranvankha1989/Translate_EV/releases/latest).
 2. Chạy file. Cửa sổ **Cài đặt** hiện ra:

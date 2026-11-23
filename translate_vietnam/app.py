@@ -21,6 +21,7 @@ import pyperclip
 import pystray
 import requests
 
+from . import busycursor
 from . import filters
 from . import hotkeys
 from . import icons
@@ -391,7 +392,8 @@ def do_translate(target, sequence, manual, job):
 
         label = "Đang tự động dịch…" if target == AUTO else f"Đang dịch {MODE_LABEL[target].lower()}…"
         animation, update_progress = start_progress(job, label, target=target)
-        result = translate(text, target, on_progress=update_progress, is_cancelled=is_cancelled)
+        with busycursor.busy(settings["busy_cursor"]):
+            result = translate(text, target, on_progress=update_progress, is_cancelled=is_cancelled)
         if not result or is_cancelled():
             return 0
 
@@ -468,7 +470,8 @@ def do_proofread(sequence, job):
             return 0
 
         animation, update_progress = start_progress(job, "Đang sửa chính tả…", face=FIX_FACE)
-        result = proofreader.proofread(text, update_progress, is_cancelled=is_cancelled)
+        with busycursor.busy(settings["busy_cursor"]):
+            result = proofreader.proofread(text, update_progress, is_cancelled=is_cancelled)
         if not result or is_cancelled():
             return 0
         if result != text and not replace_clipboard(result, sequence, job):
@@ -1259,6 +1262,7 @@ def main():
         except OSError as e:
             log(f"Không cập nhật được mục cài đặt: {e!r}")
     mode = settings["mode"]
+    busycursor.restore_if_left_over()
     translator.load_gemini_usage(settings["gemini_usage_day"], settings["gemini_usage_count"])
     apply_translator_settings()
     apply_autostart(settings["autostart"], force=installed_copy)  # bản đã cài luôn là bản tự khởi động
@@ -1288,6 +1292,7 @@ def main():
         tk_root.mainloop()
     finally:
         tk_root = None
+        busycursor.shutdown()
         icon.stop()
 
 
