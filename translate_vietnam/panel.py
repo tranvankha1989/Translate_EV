@@ -10,8 +10,8 @@ from tkinter import messagebox, ttk
 
 from . import hotkeys
 from . import updater
-from .config import (APP_NAME, APP_VERSION, ASSETS_DIR, AUTHOR_NAME, AUTHOR_ZALO_URL, DOMAINS, GEMINI_MODELS,
-                     MAX_BACKUP_KEYS, model_from_label, model_label)
+from .config import (APP_NAME, APP_VERSION, ASSETS_DIR, AUTHOR_NAME, AUTHOR_ZALO_URL, DESIGN_CREDIT, DOMAINS,
+                     GEMINI_MODELS, HOLD_KEYS, HOLD_MS_CHOICES, MAX_BACKUP_KEYS, model_from_label, model_label)
 
 MODE_CHOICES = [("auto", "Tự động hai chiều"), ("vi", "Sang tiếng Việt"), ("en", "Sang tiếng Anh"), ("off", "Tắt")]
 MODE_BY_LABEL = {label: mode for mode, label in MODE_CHOICES}
@@ -22,7 +22,18 @@ CURSOR_CHOICES = [("spin", "Vòng xoay"), ("arrow", "Mũi tên kèm vòng xoay")
 CURSOR_BY_LABEL = {label: style for style, label in CURSOR_CHOICES}
 LABEL_BY_CURSOR = dict(CURSOR_CHOICES)
 LABEL_BY_MODE = dict(MODE_CHOICES)
-HOTKEY_NAMES = {"hotkey_toggle": "Bật/tắt dịch", "hotkey_vi": "Sang tiếng Việt", "hotkey_en": "Sang tiếng Anh"}
+HOLD_KEY_BY_LABEL = {label: key for key, label in HOLD_KEYS.items()}
+
+
+def hold_ms_label(ms):
+    """600 -> "0,6 giây", 1000 -> "1 giây"."""
+    return f"{ms / 1000:g}".replace(".", ",") + " giây"
+
+
+HOLD_MS_BY_LABEL = {hold_ms_label(ms): ms for ms in HOLD_MS_CHOICES}
+LABEL_WIDTH = 13  # cột nhãn của các phần trong Bảng điều khiển thẳng hàng nhau
+HOTKEY_NAMES = {"hotkey_toggle": "Bật/tắt dịch", "hotkey_vi": "Sang tiếng Việt", "hotkey_en": "Sang tiếng Anh",
+                "hotkey_region": "Dịch vùng màn hình"}
 GEMINI_KEY_URL = "https://aistudio.google.com/apikey"
 _MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -128,7 +139,11 @@ class ControlPanel:
         header = tk.Frame(outer, bg=bg)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         header.columnconfigure(0, weight=1)
-        tk.Label(header, text=APP_NAME, font=("Segoe UI", 10, "bold"), bg=bg).grid(row=0, column=0, sticky="w")
+        name = tk.Frame(header, bg=bg)
+        name.grid(row=0, column=0, sticky="w")
+        tk.Label(name, text=APP_NAME, font=("Segoe UI", 10, "bold"), bg=bg).pack(side="left")
+        tk.Label(name, text=DESIGN_CREDIT, font=("Segoe UI", 8), fg="#666666", bg=bg).pack(
+            side="left", padx=(6, 0), pady=(2, 0))
         self.version_badge = tk.Label(header, font=("Segoe UI", 9), bd=0, padx=8, pady=2)
         self.version_badge.grid(row=0, column=1, sticky="e")
         self.version_badge.bind("<Button-1>", lambda e: self._badge_clicked())
@@ -148,42 +163,75 @@ class ControlPanel:
         self._badge_normal()
 
     def _build_basic(self, outer):
-        basic = ttk.LabelFrame(outer, text="Điều khiển", padding=(10, 6))
+        basic = ttk.Frame(outer)
         basic.grid(row=1, column=0, sticky="ew")
-        basic.columnconfigure(1, weight=1)
+        basic.columnconfigure(0, weight=1)
 
-        ttk.Label(basic, text="Chế độ dịch:").grid(row=0, column=0, sticky="w", pady=3)
+        # Chung cho cả dịch chữ và dịch hình ảnh
+        common = ttk.LabelFrame(basic, text="Chung", padding=(10, 4))
+        common.grid(row=0, column=0, sticky="ew")
+        common.columnconfigure(1, weight=1)
+        ttk.Label(common, text="Lĩnh vực:", width=LABEL_WIDTH).grid(row=0, column=0, sticky="w", pady=3)
+        self.domain_var = tk.StringVar()
+        domain_box = ttk.Combobox(common, textvariable=self.domain_var, values=DOMAINS, width=26)
+        domain_box.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
+        for sequence in ("<<ComboboxSelected>>", "<FocusOut>", "<Return>"):
+            domain_box.bind(sequence, lambda e: self._save_gemini())
+        self.engine_label = ttk.Label(common, style="Hint.TLabel", wraplength=300)
+        self.engine_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 2))
+
+        # Dịch chữ: bôi đen rồi copy
+        text = ttk.LabelFrame(basic, text="Dịch chữ (bôi đen rồi copy)", padding=(10, 4))
+        text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        text.columnconfigure(1, weight=1)
+
+        ttk.Label(text, text="Chế độ dịch:", width=LABEL_WIDTH).grid(row=0, column=0, sticky="w", pady=3)
         self.mode_var = tk.StringVar()
-        mode_box = ttk.Combobox(basic, textvariable=self.mode_var, state="readonly", width=26,
+        mode_box = ttk.Combobox(text, textvariable=self.mode_var, state="readonly", width=26,
                                 values=[label for _, label in MODE_CHOICES])
         mode_box.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
         mode_box.bind("<<ComboboxSelected>>", lambda e: self.c.set_mode(MODE_BY_LABEL[self.mode_var.get()]))
 
-        ttk.Label(basic, text="Dịch khi:").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Label(text, text="Dịch khi:", width=LABEL_WIDTH).grid(row=1, column=0, sticky="w", pady=3)
         self.trigger_var = tk.StringVar()
-        trigger_box = ttk.Combobox(basic, textvariable=self.trigger_var, state="readonly", width=26,
+        trigger_box = ttk.Combobox(text, textvariable=self.trigger_var, state="readonly", width=26,
                                    values=[label for _, label in TRIGGER_CHOICES])
         trigger_box.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
         trigger_box.bind("<<ComboboxSelected>>",
                          lambda e: self.c.set_option("trigger", TRIGGER_BY_LABEL[self.trigger_var.get()]))
 
-        ttk.Label(basic, text="Lĩnh vực:").grid(row=2, column=0, sticky="w", pady=3)
-        self.domain_var = tk.StringVar()
-        domain_box = ttk.Combobox(basic, textvariable=self.domain_var, values=DOMAINS, width=26)
-        domain_box.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=3)
-        for sequence in ("<<ComboboxSelected>>", "<FocusOut>", "<Return>"):
-            domain_box.bind(sequence, lambda e: self._save_gemini())
-
-        ttk.Label(basic, text="Phím bật/tắt:").grid(row=3, column=0, sticky="w", pady=3)
-        entry = HotkeyEntry(basic, self, "hotkey_toggle")
-        entry.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=3)
+        ttk.Label(text, text="Phím bật/tắt:", width=LABEL_WIDTH).grid(row=2, column=0, sticky="w", pady=3)
+        entry = HotkeyEntry(text, self, "hotkey_toggle")
+        entry.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=3)
         self.hotkey_entries.append(entry)
 
-        self._check(basic, "proofread_on_cut", "Nhấn Ctrl+X: sửa chính tả, câu văn (cần Gemini)").grid(
-            row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self._check(text, "proofread_on_cut", "Nhấn Ctrl+X: sửa chính tả, câu văn (cần Gemini)").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(2, 2))
 
-        self.engine_label = ttk.Label(basic, style="Hint.TLabel", wraplength=300)
-        self.engine_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        # Dịch hình ảnh: giữ phím, kéo khung quanh vùng chữ trên màn hình
+        image = ttk.LabelFrame(basic, text="Dịch hình ảnh (vùng trên màn hình)", padding=(10, 4))
+        image.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        image.columnconfigure(1, weight=1)
+
+        self._check(image, "region_on_hold", "Giữ phím để chọn vùng màn hình cần dịch").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.bool_vars["region_on_hold"].trace_add("write", lambda *a: self._sync_region_state())
+
+        ttk.Label(image, text="Phím giữ:", width=LABEL_WIDTH).grid(row=1, column=0, sticky="w", pady=3)
+        self.hold_key_var = tk.StringVar()
+        self.hold_key_box = ttk.Combobox(image, textvariable=self.hold_key_var, state="readonly", width=26,
+                                         values=list(HOLD_KEYS.values()))
+        self.hold_key_box.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
+        self.hold_key_box.bind("<<ComboboxSelected>>", lambda e: self.c.set_option(
+            "region_hold_key", HOLD_KEY_BY_LABEL[self.hold_key_var.get()]))
+
+        ttk.Label(image, text="Thời gian giữ:", width=LABEL_WIDTH).grid(row=2, column=0, sticky="w", pady=3)
+        self.hold_ms_var = tk.StringVar()
+        self.hold_ms_box = ttk.Combobox(image, textvariable=self.hold_ms_var, state="readonly", width=26,
+                                        values=list(HOLD_MS_BY_LABEL))
+        self.hold_ms_box.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(3, 4))
+        self.hold_ms_box.bind("<<ComboboxSelected>>", lambda e: self.c.set_option(
+            "region_hold_ms", HOLD_MS_BY_LABEL[self.hold_ms_var.get()]))
 
 
         system = ttk.Frame(outer)
@@ -273,14 +321,14 @@ class ControlPanel:
         keys = ttk.Frame(tabs, padding=10)
         tabs.add(keys, text="Phím tắt")
         keys.columnconfigure(1, weight=1)
-        for row, key in enumerate(("hotkey_vi", "hotkey_en")):
+        for row, key in enumerate(("hotkey_vi", "hotkey_en", "hotkey_region")):
             ttk.Label(keys, text=HOTKEY_NAMES[key] + ":").grid(row=row, column=0, sticky="w", pady=3)
             entry = HotkeyEntry(keys, self, key)
             entry.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
             self.hotkey_entries.append(entry)
         ttk.Label(keys, style="Hint.TLabel", wraplength=320,
                   text="Bấm vào ô rồi nhấn phím mới. Esc: giữ phím cũ, Backspace: bỏ phím.").grid(
-            row=2, column=0, columnspan=2, sticky="w")
+            row=3, column=0, columnspan=2, sticky="w")
 
         privacy = ttk.Frame(tabs, padding=10)
         tabs.add(privacy, text="Bảo vệ dữ liệu")
@@ -447,6 +495,8 @@ class ControlPanel:
         self.model_var.set(model_label(self.c.get("gemini_model")))
         self.email_var.set(self.c.get("mymemory_email"))
         self.cursor_var.set(LABEL_BY_CURSOR.get(self.c.get("busy_cursor"), CURSOR_CHOICES[0][1]))
+        self.hold_key_var.set(HOLD_KEYS.get(self.c.get("region_hold_key"), HOLD_KEYS["shift"]))
+        self.hold_ms_var.set(hold_ms_label(self.c.get("region_hold_ms")))
         self.refresh_checks()
         for entry in self.hotkey_entries:
             if self.root.focus_get() is not entry:
@@ -460,6 +510,12 @@ class ControlPanel:
         """Cập nhật các ô tích (ví dụ khi bật / tắt sửa chính tả từ menu khay)."""
         for key, var in self.bool_vars.items():
             var.set(self.c.get(key))
+
+    def _sync_region_state(self):
+        """Tắt "Giữ phím để chọn vùng" thì hai ô Phím giữ / Thời gian giữ mờ đi."""
+        state = "readonly" if self.bool_vars["region_on_hold"].get() else "disabled"
+        for box in (self.hold_key_box, self.hold_ms_box):
+            box.configure(state=state)
 
     # ---------- lưu cài đặt ----------
     def _save_email(self):
@@ -796,12 +852,26 @@ class ControlPanel:
     # ---------- hướng dẫn / thông tin ----------
     def show_help(self):
         vi, en, toggle = (hotkeys.display(self.c.get(k)) for k in ("hotkey_vi", "hotkey_en", "hotkey_toggle"))
+        region_key = self.c.get("hotkey_region")
+        region_line = (f"• {hotkeys.display(region_key)}: chọn vùng màn hình để dịch (như giữ phím).\n"
+                       if region_key else "")
+        hold_key = HOLD_KEYS.get(self.c.get("region_hold_key"), HOLD_KEYS["shift"])
+        hold_time = hold_ms_label(self.c.get("region_hold_ms"))
         messagebox.showinfo(f"Hướng dẫn – {APP_NAME}", (
             "Cách dùng:\n"
             "1. Bôi đen văn bản và nhấn nhanh Ctrl+C hai lần. Copy một lần là copy bình thường, "
             "không dịch. (Nếu chọn \"Dịch khi: Mỗi lần copy\" thì chỉ cần nhấn một lần.)\n"
             "2. Chờ icon ở khay hệ thống tô xanh đủ 100%: clipboard lúc này là bản dịch.\n"
             "3. Nhấn Ctrl+V để dán bản dịch.\n\n"
+            "Dịch vùng màn hình (file PDF không cho copy, PDF scan, ảnh, phần mềm...):\n"
+            f"1. Giữ riêng phím {hold_key} khoảng {hold_time}: màn hình mờ đi, con trỏ thành dấu +.\n"
+            "2. Kéo chuột bao quanh đoạn chữ cần dịch rồi thả (Esc hoặc chuột phải: hủy).\n"
+            "3. Bản dịch hiện trong khung nhỏ ngay dưới vùng đó. Bấm \"Sao chép\" để lấy bản dịch; "
+            "Esc hoặc bấm ra ngoài khung để đóng. Muốn dời khung: giữ chuột ở dòng trên cùng của khung "
+            "rồi kéo đi chỗ khác.\n"
+            "Gemini đọc và dịch chữ trong ảnh (1 lượt mỗi lần). Gemini hết lượt: Windows đọc chữ rồi "
+            "Google Dịch dịch. Bật / tắt, đổi phím giữ và thời gian giữ ở phần \"Dịch hình ảnh\" "
+            "trong Bảng điều khiển.\n\n"
             "Sửa chính tả, câu văn (cần API key Gemini):\n"
             "1. Bôi đen đoạn văn và nhấn Ctrl+X.\n"
             "2. Chờ icon ở khay hệ thống hiện chữ S màu cam và tô xanh đủ 100%.\n"
@@ -817,6 +887,7 @@ class ControlPanel:
             f"• {vi}: chuyển sang chế độ Sang tiếng Việt và dịch luôn clipboard.\n"
             f"• {en}: chuyển sang chế độ Sang tiếng Anh và dịch luôn clipboard.\n"
             f"• {toggle}: tắt dịch / bật lại chế độ trước đó.\n"
+            + region_line +
             "• Bấm trái vào icon: tắt / bật dịch. Chuột phải: menu.\n\n"
             "Dịch theo lĩnh vực:\n"
             "Nhập API key Gemini ở phần Mở rộng rồi chọn Lĩnh vực. Không có key thì app "

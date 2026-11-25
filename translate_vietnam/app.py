@@ -9,6 +9,7 @@ Phím tắt mặc định (đổi được trong Bảng điều khiển):
 Chạy app lần nữa khi app đang chạy sẽ mở Bảng điều khiển của bản đang chạy.
 """
 import ctypes
+import io
 import os
 import re
 import sys
@@ -20,6 +21,7 @@ from queue import Empty, SimpleQueue
 import pyperclip
 import pystray
 import requests
+from PIL import Image
 
 from . import busycursor
 from . import filters
@@ -27,10 +29,12 @@ from . import hotkeys
 from . import icons
 from . import installer
 from . import keywatch
+from . import ocr
 from . import proofreader
+from . import selection
 from . import translator
 from . import updater
-from .config import APP_NAME, APP_VERSION, Settings, config_dir, model_label
+from .config import APP_NAME, APP_VERSION, HOLD_KEYS, Settings, config_dir, model_label
 from .translator import TranslationCancelled, is_vietnamese, translate
 
 OFF, AUTO, TO_VI, TO_EN = "off", "auto", "vi", "en"
@@ -40,8 +44,11 @@ MODE_LABEL = {OFF: "Tắt", AUTO: "Tự động", TO_VI: "Sang Việt", TO_EN: "
 # Khi chạy từ mã nguồn: thư mục dự án chứa app.py (file khởi chạy) và app.log.
 SOURCE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAUNCHER = os.path.join(SOURCE_ROOT, "app.py")
-HOTKEY_KEYS = ("hotkey_vi", "hotkey_en", "hotkey_toggle")
-HOTKEY_NAMES = {"hotkey_vi": "Sang tiếng Việt", "hotkey_en": "Sang tiếng Anh", "hotkey_toggle": "Bật/tắt dịch"}
+HOTKEY_KEYS = ("hotkey_vi", "hotkey_en", "hotkey_toggle", "hotkey_region")
+HOTKEY_NAMES = {"hotkey_vi": "Sang tiếng Việt", "hotkey_en": "Sang tiếng Anh", "hotkey_toggle": "Bật/tắt dịch",
+                "hotkey_region": "Dịch vùng màn hình"}
+REGION_MAX_SIDE = 2400  # ảnh vùng chọn lớn hơn thì thu nhỏ trước khi gửi Gemini (vẫn đủ nét để đọc)
+OCR_MIN_SIDE = 1000  # ảnh nhỏ hơn thì phóng to gấp đôi cho bộ đọc chữ của Windows đọc chính xác hơn
 MAX_WORKERS = 3
 ERROR_NOTICE_INTERVAL = 600  # giây tối thiểu giữa hai lần báo "không dịch được"
 # Ctrl+C hai lần: hai lần copy cùng nội dung cách nhau trong khoảng này mới dịch.
@@ -128,6 +135,9 @@ hotkey_manager = None
 listener_hwnd = None  # cửa sổ ẩn nhận báo clipboard và phím Ctrl+X
 _gemini_hint_shown = False
 _instance_mutex = None
+quick_popup = None  # popup.QuickPopup: khung bản dịch vùng màn hình
+region_picker = None  # region.RegionPicker: lớp phủ mờ để kéo chọn vùng màn hình
+quick_request = 0  # tăng mỗi lần chọn vùng; kết quả của lần chọn cũ hơn thì bỏ
 
 
 # ---------------------------------------------------------------- nhật ký lỗi
@@ -707,9 +717,14 @@ def set_mode(m):
 
 
 def apply_keywatch():
-    """Nghe phím Ctrl+X chỉ khi bật sửa chính tả (việc đăng ký chạy trên luồng cửa sổ ẩn)."""
+    """Nghe bàn phím chỉ khi bật sửa chính tả (Ctrl+X) hoặc giữ phím để dịch vùng màn hình
+    (việc đăng ký chạy trên luồng cửa sổ ẩn)."""
+    keywatch.hold.key_name = settings["region_hold_key"]
+    keywatch.hold.seconds = settings["region_hold_ms"] / 1000
+    keywatch.hold.enabled = bool(settings["region_on_hold"])
     if listener_hwnd:
-        user32.PostMessageW(listener_hwnd, WM_KEYWATCH, int(bool(settings["proofread_on_cut"])), 0)
+        enabled = settings["proofread_on_cut"] or settings["region_on_hold"]
+        user32.PostMessageW(listener_hwnd, WM_KEYWATCH, int(bool(enabled)), 0)
 
 
 def set_proofread(enabled):
@@ -736,6 +751,102 @@ def switch_to(m):
     change_mode(m, manual=True)
 
 
+def copy_quick_result(text):
+    """Nút "Sao chép" của khung dịch nhanh: chép bản dịch vào clipboard, không dịch lại lần nữa."""
+    global last_internal_text
+    with tray_lock:
+        last_internal_text = text
+    try:
+        pyperclip.copy(text)
+    except pyperclip.PyperclipException as e:
+        log(f"Không chép được bản dịch: {e!r}")
+
+
+def start_region_pick():
+    """Giữ phím (mặc định Shift) hoặc phím tắt Dịch vùng màn hình: phủ mờ màn hình để kéo chọn vùng cần dịch.
+    Chạy được từ mọi luồng; dịch được cả tài liệu không cho copy chữ (PDF khóa, PDF scan, ảnh...)."""
+    def begin():
+        if region_picker:
+            if quick_popup:
+                quick_popup.close()  # khung bản dịch cũ không được lọt vào ảnh chụp
+            region_picker.start(on_region_picked)
+    ui_call(begin)
+
+
+def on_region_picked(box, image):
+    """Lớp phủ trả về vùng đã chọn (None: người dùng hủy) và ảnh chụp vùng đó."""
+    if box is not None:
+        threading.Thread(target=translate_region, args=(box, image), daemon=True).start()
+
+
+def png_bytes(image, *, max_side=None, min_side=None):
+    """Ảnh -> PNG. max_side: thu nhỏ ảnh quá lớn; min_side: phóng to gấp đôi ảnh nhỏ (chữ rõ hơn để đọc)."""
+    width, height = image.size
+    if max_side and max(width, height) > max_side:
+        ratio = max_side / max(width, height)
+        image = image.resize((max(1, round(width * ratio)), max(1, round(height * ratio))),
+                             Image.Resampling.LANCZOS)
+    elif min_side and max(width, height) < min_side:
+        image = image.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def translate_region(box, image):
+    """Đọc và dịch chữ trong ảnh vùng màn hình, hiện bản dịch ngay dưới vùng đó."""
+    global quick_request
+    with tray_lock:
+        quick_request += 1
+        request = quick_request
+    left, top, right, bottom = box
+    ui_call(lambda: quick_popup and quick_popup.open(request, box, right - left))
+
+    def show(message, title=""):
+        ui_call(lambda: quick_popup and quick_popup.finish(request, message, title))
+
+    if image is None:
+        log("Dịch vùng màn hình: không chụp được vùng đã chọn")
+        show("Không chụp được vùng màn hình. Hãy thử lại.")
+        return
+    used_ocr = []
+
+    def read_text(_png):
+        used_ocr.append(True)
+        return selection.unwrap_lines(ocr.windows_ocr(png_bytes(image, min_side=OCR_MIN_SIDE)))
+
+    started = time.monotonic()
+    try:
+        result = translator.translate_image(png_bytes(image, max_side=REGION_MAX_SIDE), ocr=read_text,
+                                            is_cancelled=lambda: quick_request != request)
+    except TranslationCancelled:
+        return
+    except translator.NoTextFound:
+        show(f"Không thấy chữ trong vùng đã chọn. Giữ {HOLD_KEYS[settings['region_hold_key']]} rồi kéo khung "
+             "bao quanh đoạn chữ cần dịch.")
+        return
+    except ocr.OcrError as e:
+        log(f"Dịch vùng màn hình: {e}")
+        show("Gemini đang hết lượt hoặc lỗi, và bộ đọc chữ của Windows không đọc được ảnh này. "
+             "Hãy thử lại sau.")
+        return
+    except Exception as e:
+        log(f"Lỗi dịch vùng màn hình: {e!r}")
+        show("Không dịch được. Kiểm tra kết nối mạng hoặc API key Gemini rồi thử lại.")
+        return
+    finally:
+        save_gemini_usage()
+        if translator.last_gemini_error or settings["gemini_api_key"]:
+            ui_call(lambda: panel and panel.refresh_engine())
+    title = "Tiếng Việt" if is_vietnamese(result) else "Tiếng Anh"
+    if used_ocr:
+        title += " (Windows đọc chữ, chất lượng thấp hơn Gemini)"
+    show(result.strip(), title)
+    seconds = f"{time.monotonic() - started:.1f}".replace(".", ",")
+    log(f"Thời gian: dịch vùng màn hình {right - left}x{bottom - top} điểm ảnh trong {seconds} giây "
+        f"({translator.last_engine or 'không rõ'})")
+
+
 def is_mode(m):
     return lambda item: current_mode() == m
 
@@ -745,6 +856,7 @@ def hotkey_bindings():
         "hotkey_vi": (settings["hotkey_vi"], lambda: switch_to(TO_VI)),
         "hotkey_en": (settings["hotkey_en"], lambda: switch_to(TO_EN)),
         "hotkey_toggle": (settings["hotkey_toggle"], toggle_off),
+        "hotkey_region": (settings["hotkey_region"], start_region_pick),
     }
 
 
@@ -899,6 +1011,8 @@ class Controller:
             set_proofread(value)
             return
         settings.update(**{key: value})
+        if key in ("region_on_hold", "region_hold_key", "region_hold_ms"):
+            apply_keywatch()
         if key == "autostart":
             apply_autostart(value, force=True)
         elif key == "mymemory_email":
@@ -1232,7 +1346,7 @@ def pump_ui():
 
 
 def main():
-    global settings, mode, seen_sequence, hotkey_manager, icon, panel, tk_root
+    global settings, mode, seen_sequence, hotkey_manager, icon, panel, tk_root, quick_popup, region_picker
     args = updater.parse_args(sys.argv[1:])
     if "copy-to" in args:  # tiến trình phụ có quyền quản trị: chỉ chép file exe rồi thoát
         sys.exit(0 if updater.copy_self_to(args["copy-to"]) else 1)
@@ -1277,11 +1391,16 @@ def main():
     from PIL import ImageTk
 
     from .panel import ControlPanel
+    from .popup import QuickPopup
+    from .region import RegionPicker
 
     tk_root = tk.Tk()
     tk_root.withdraw()
     window_icon = ImageTk.PhotoImage(icons.app_icon(64))
     panel = ControlPanel(tk_root, Controller(), window_icon)
+    quick_popup = QuickPopup(tk_root, copy_quick_result)
+    region_picker = RegionPicker(tk_root)
+    keywatch.hold.on_hold = start_region_pick
     icon = pystray.Icon("translate-vn", icons.tray_icon(mode, 0),
                         f"{APP_NAME}: {MODE_LABEL[mode]}", build_menu())
     icon.run_detached(setup=lambda icon_: on_ready(icon_, hotkey_errors, args.get("updated"),

@@ -11,9 +11,10 @@ import threading
 from ctypes import wintypes
 
 APP_NAME = "Translate Vietnam"
-APP_VERSION = "1.1.4"  # tăng số này trước mỗi lần chạy scripts\release.bat
+APP_VERSION = "1.2.0"  # tăng số này trước mỗi lần chạy scripts\release.bat
 UPDATE_REPO = "tranvankha1989/Translate_EV"  # repo GitHub chứa các bản phát hành
 AUTHOR_NAME = "Trần Văn Kha"
+DESIGN_CREDIT = "Design by KhaTran"  # dòng nhỏ cạnh tên app trên Bảng điều khiển
 AUTHOR_ZALO_URL = "https://zaloapp.com/qr/p/376biavcj0xw"  # nội dung mã QR Zalo trong assets\zalo_qr.png
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
@@ -55,6 +56,7 @@ DEFAULTS = {
     "hotkey_vi": "f8",
     "hotkey_en": "f9",
     "hotkey_toggle": "f10",
+    "hotkey_region": "",  # phím tắt mở khung chọn vùng màn hình (ngoài cách giữ phím); trống: không dùng
     "autostart": True,
     "show_panel_on_start": False,
     "skip_password_managers": True,
@@ -68,6 +70,11 @@ DEFAULTS = {
     "domain_default_migrated": True,  # đã chuyển lĩnh vực mặc định cũ "Kỹ thuật" sang mặc định mới (1.1.0)
     # Nhấn Ctrl+X: sửa chính tả, câu văn của đoạn vừa cắt rồi Ctrl+V để dán (cần API key Gemini).
     "proofread_on_cut": True,
+    # Giữ riêng một phím (mặc định Shift) ~0,6 giây: phủ mờ màn hình, kéo chọn vùng chữ,
+    # bản dịch hiện ngay dưới vùng đó.
+    "region_on_hold": True,
+    "region_hold_key": "shift",  # phím giữ: một trong HOLD_KEYS
+    "region_hold_ms": 600,  # giữ phím lâu chừng này (mili giây) thì mở khung
     # Cắt từ các app này thì không sửa (code, lệnh, số liệu bảng tính dễ bị làm hỏng).
     "proofread_excluded_apps": ["code.exe", "cursor.exe", "devenv.exe", "pycharm64.exe", "idea64.exe",
                                 "sublime_text.exe", "notepad++.exe", "windowsterminal.exe", "cmd.exe",
@@ -82,6 +89,10 @@ DEFAULTS = {
 }
 TRIGGERS = ("double", "single")
 BUSY_CURSOR_STYLES = ("spin", "arrow", "off")
+# Phím giữ để dịch vùng màn hình: mã lưu trong cài đặt -> tên hiện cho người dùng.
+HOLD_KEYS = {"shift": "Shift", "rshift": "Shift phải", "ctrl": "Ctrl", "rctrl": "Ctrl phải"}
+HOLD_MS_CHOICES = (300, 400, 500, 600, 800, 1000, 1500, 2000)
+HOLD_MS_RANGE = (200, 3000)
 OLD_DEFAULT_DOMAIN = "Kỹ thuật"  # mặc định trước bản 1.1.0
 
 
@@ -185,6 +196,10 @@ class Settings:
             self._data["trigger"] = DEFAULTS["trigger"]
         if self._data["busy_cursor"] not in BUSY_CURSOR_STYLES:
             self._data["busy_cursor"] = DEFAULTS["busy_cursor"]
+        if self._data["region_hold_key"] not in HOLD_KEYS:
+            self._data["region_hold_key"] = DEFAULTS["region_hold_key"]
+        if not HOLD_MS_RANGE[0] <= self._data["region_hold_ms"] <= HOLD_MS_RANGE[1]:
+            self._data["region_hold_ms"] = DEFAULTS["region_hold_ms"]
         if self._data["mode"] not in MODES:
             self._data["mode"] = DEFAULTS["mode"]
         if self._data["last_on_mode"] not in MODES or self._data["last_on_mode"] == "off":

@@ -11,6 +11,7 @@ Copy một lần vẫn là copy bình thường.
 
 - Chạy nền ở khay hệ thống, có Bảng điều khiển gọn (nút **Mở rộng** để hiện thêm tùy chọn).
 - **Dịch khi nhấn `Ctrl+C` hai lần** (mặc định), hoặc dịch mọi lần copy (đổi ở ô *Dịch khi*).
+- **Dịch vùng màn hình bằng cách giữ `Shift`** (đổi được phím và thời gian giữ): giữ phím Shift, kéo khung quanh đoạn chữ (như công cụ chụp màn hình của Windows), bản dịch hiện ngay dưới khung. Dùng được cho mọi tài liệu, kể cả PDF không cho copy, PDF scan, ảnh.
 - **Sửa chính tả, câu văn khi nhấn `Ctrl+X`** (cần API key Gemini): sửa lỗi chính tả, dấu tiếng Việt (kể cả gõ không dấu), ngữ pháp, dấu câu; viết lại câu vụng cho tự nhiên, không bay bổng; giữ nguyên ngôn ngữ, ý và giọng văn.
 - Chế độ **Tự động hai chiều**: tiếng Việt → tiếng Anh, tiếng Anh và ngôn ngữ khác → tiếng Việt.
 - Chế độ cố định **Sang tiếng Việt** / **Sang tiếng Anh**, và **Tắt** để copy bình thường.
@@ -42,6 +43,18 @@ Chạy trên mọi máy Windows 10 / 11 (64-bit), không cần cài Python hay c
 
 Cài không hỏi (cho quản trị viên): `TranslateVietnam.exe --install-to "D:\Apps" --no-desktop`.
 
+## Dịch vùng màn hình bằng cách giữ Shift
+
+1. Giữ riêng phím `Shift` khoảng nửa giây: màn hình mờ đi, con trỏ thành dấu chữ thập.
+2. Kéo chuột bao quanh đoạn chữ cần dịch rồi thả. `Esc` hoặc chuột phải để hủy.
+3. Khung nhỏ hiện ngay dưới vùng vừa chọn: *Đang đọc và dịch…* rồi bản dịch. Bấm **Sao chép** để lấy bản dịch; `Esc` hoặc bấm chuột ra ngoài khung để đóng. Muốn dời khung: giữ chuột ở dòng trên cùng của khung (chỗ chữ *Tiếng Việt* / *Tiếng Anh*) rồi kéo đi chỗ khác.
+
+- Dùng được cho mọi thứ hiện trên màn hình: PDF không cho copy, PDF scan, ảnh, phần mềm, video...
+- Gemini đọc chữ trong ảnh và dịch trong một lượt (cần API key Gemini). Không có key, Gemini hết lượt hoặc lỗi: bộ đọc chữ có sẵn của Windows đọc ảnh rồi Google Dịch / MyMemory dịch (chất lượng thấp hơn; Windows chỉ đọc được ngôn ngữ có gói OCR trên máy, thường là tiếng Anh).
+- Chiều dịch tự nhận: tiếng Việt → tiếng Anh, ngôn ngữ khác → tiếng Việt. Dùng được cả khi đang tắt dịch clipboard. Không đụng tới clipboard.
+- Để không bật nhầm: khung chỉ hiện khi giữ **riêng** Shift. Có bấm phím khác (gõ chữ hoa, Shift+mũi tên để bôi đen, Ctrl+Shift của bộ gõ...), bấm chuột (Shift+bấm để bôi đen) hay lăn chuột trong lúc giữ thì không hiện.
+- Bật / tắt ở ô *Giữ phím để chọn vùng màn hình cần dịch* ở phần **Dịch hình ảnh** của Bảng điều khiển. Cũng ở đó: *Phím giữ* (Shift, Shift phải, Ctrl, Ctrl phải; mặc định Shift) và *Thời gian giữ* (0,3 – 2 giây; mặc định 0,6 giây). Muốn dùng phím tắt thay vì giữ phím: Mở rộng → **Phím tắt** → *Dịch vùng màn hình*.
+
 ## Sửa chính tả, câu văn bằng Ctrl+X
 
 1. Bôi đen đoạn văn cần sửa và nhấn `Ctrl+X`.
@@ -52,7 +65,7 @@ Cài không hỏi (cho quản trị viên): `TranslateVietnam.exe --install-to "
 - Nếu chưa sửa xong hoặc không sửa được (mất mạng, hết lượt, kết quả khác bản gốc quá nhiều), `Ctrl+V` dán lại đúng đoạn bạn đã cắt, không mất chữ.
 - Không sửa đoạn chỉ có một từ, nội dung riêng tư (mật khẩu, token...) và nội dung cắt từ trình soạn code, cửa sổ lệnh, Excel. Danh sách app bỏ qua đổi được ở Mở rộng → **Bảo vệ dữ liệu**.
 - Bật / tắt ở phần Điều khiển, hoặc chuột phải vào icon → *Sửa chính tả khi nhấn Ctrl+X*.
-- Để nhận ra `Ctrl+X`, app dùng Raw Input của Windows ở chế độ chỉ nghe: không chặn hay làm chậm bàn phím, chỉ ghi lại thời điểm nhấn `Ctrl+X` / `Ctrl+C`, không lưu phím nào khác. Tắt tính năng thì app ngừng nghe bàn phím.
+- Để nhận ra `Ctrl+X` và lúc giữ phím, app dùng Raw Input của Windows ở chế độ chỉ nghe: không chặn hay làm chậm bàn phím, chỉ ghi lại thời điểm nhấn `Ctrl+X` / `Ctrl+C` và lúc giữ / nhả phím giữ (chuột chỉ được nghe trong lúc đang giữ phím đó), không lưu phím nào khác. Tắt cả hai tính năng thì app ngừng nghe bàn phím.
 
 ## Điều khiển
 
@@ -63,6 +76,7 @@ Cài không hỏi (cho quản trị viên): `TranslateVietnam.exe --install-to "
 | `F8` | Chuyển sang chế độ Sang tiếng Việt và dịch luôn clipboard |
 | `F9` | Chuyển sang chế độ Sang tiếng Anh và dịch luôn clipboard |
 | `F10` | Tắt dịch / bật lại chế độ trước đó |
+| Giữ `Shift` (đổi được) | Chọn vùng màn hình để dịch, bản dịch hiện ngay dưới vùng đó |
 
 Các phím tắt đổi được trong Bảng điều khiển → Mở rộng → Phím tắt (bấm vào ô rồi nhấn phím mới; Backspace để bỏ phím). Nếu phím bị phần mềm khác chiếm, ứng dụng sẽ báo để bạn đổi phím khác.
 
@@ -141,9 +155,13 @@ Translate Vietnam/
 │   ├── panel.py            Bảng điều khiển, Hướng dẫn, Giới thiệu
 │   ├── translator.py       Dịch bằng Gemini theo lĩnh vực, dự phòng Google Dịch và MyMemory
 │   ├── proofreader.py      Sửa chính tả, câu văn bằng Gemini
-│   ├── keywatch.py         Nhận biết phím Ctrl+X
+│   ├── keywatch.py         Nhận biết phím Ctrl+X, giữ Shift
 │   ├── filters.py          Bỏ qua nội dung riêng tư
 │   ├── hotkeys.py          Phím tắt toàn cục
+│   ├── region.py           Lớp phủ mờ để kéo chọn vùng màn hình cần dịch
+│   ├── popup.py            Khung bản dịch ngay dưới vùng đã chọn
+│   ├── selection.py        Tọa độ màn hình, vị trí khung, nối dòng chữ bị ngắt
+│   ├── ocr.py              Bộ đọc chữ của Windows (dự phòng khi Gemini hết lượt)
 │   ├── config.py           Cài đặt người dùng, phiên bản, thông tin tác giả
 │   ├── icons.py            Icon khay và icon app
 │   ├── installer.py        Cài vào Windows, gỡ cài đặt
