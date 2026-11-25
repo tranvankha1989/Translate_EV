@@ -183,6 +183,44 @@ class GeminiTests(unittest.TestCase):
             self.assertEqual(translator.translate("second one", "vi"), "google:second one")
         self.assertEqual(len(session.calls), 1)
 
+    def test_instruction_explains_chat_messages(self):
+        to_en = translator._gemini_instruction("en", "Chung")
+        to_vi = translator._gemini_instruction("vi", "Chung")
+        self.assertIn("@mentions", to_en)
+        self.assertIn("a = anh", to_en)
+        self.assertIn("@mentions", to_vi)
+        self.assertNotIn("a = anh", to_vi)  # bảng viết tắt tiếng Việt chỉ cần khi dịch sang tiếng Anh
+
+    def test_untranslated_vietnamese_is_sent_again(self):
+        chat = "A @Anh Tú còn a e nào chưa có việc nhờ tạo Logo cho ĐHL nha a"
+        english = "@Anh Tú, does anyone still have no work? Please ask them to make a logo for ĐHL."
+        session = FakeSession(gemini_ok(chat[2:]), gemini_ok(english))
+        with patch.object(translator, "_session", return_value=session), \
+                patch.object(translator, "_google_cached", side_effect=AssertionError("no Google")):
+            self.assertEqual(translator.translate(chat, "auto"), english)
+            self.assertEqual(translator.translate(chat, "auto"), english)  # nhớ bản đã dịch, không gọi lại
+        self.assertEqual(len(session.calls), 2)
+        retry_instruction = session.calls[1][1]["json"]["systemInstruction"]["parts"][0]["text"]
+        self.assertIn("NOT English yet", retry_instruction)
+
+    def test_untranslated_twice_falls_back_to_free_service(self):
+        chat = "a e nào rảnh thì nhắn em nha"
+        session = FakeSession(gemini_ok(chat), gemini_ok(chat))
+        with patch.object(translator, "_session", return_value=session), \
+                patch.object(translator, "_google_cached", side_effect=lambda c, t: (f"google:{c}", "vi")):
+            self.assertEqual(translator.translate(chat, "en"), f"google:{chat}")
+        self.assertEqual(len(session.calls), 2)
+        self.assertNotIn((chat, ("translate", "en", translator.gemini_domain), translator.gemini_model),
+                         translator._gemini_cache)
+
+    def test_english_with_vietnamese_names_is_not_untranslated(self):
+        self.assertFalse(translator._looks_untranslated(
+            "Gửi anh Nguyễn Đức Thắng", "To Mr. Nguyễn Đức Thắng", "en"))
+        self.assertFalse(translator._looks_untranslated("Cảm ơn anh Tú", "Thanks, Tú", "en"))
+        self.assertFalse(translator._looks_untranslated("Xin chào", "Xin chào", "vi"))
+        self.assertTrue(translator._looks_untranslated(
+            "A @Anh Tú còn a e nào chưa có việc", "@Anh Tú còn a e nào chưa có việc", "en"))
+
     def test_auto_model_uses_latest_alias(self):
         translator.configure(gemini_model="auto")
         session = FakeSession(gemini_ok("Bơm"))
